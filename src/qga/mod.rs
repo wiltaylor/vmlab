@@ -270,10 +270,7 @@ impl GaClient {
 
     /// List guest network interfaces with their MAC and IP addresses
     /// (`guest-network-get-interfaces`).
-    pub async fn network_interfaces(
-        &self,
-        timeout: Duration,
-    ) -> Result<Vec<GaInterface>, GaError> {
+    pub async fn network_interfaces(&self, timeout: Duration) -> Result<Vec<GaInterface>, GaError> {
         #[derive(Deserialize)]
         struct WireIp {
             #[serde(rename = "ip-address")]
@@ -319,7 +316,9 @@ impl GaClient {
             )
             .await?;
         value.as_i64().ok_or_else(|| {
-            GaError::Protocol(format!("guest-file-open returned non-integer handle: {value}"))
+            GaError::Protocol(format!(
+                "guest-file-open returned non-integer handle: {value}"
+            ))
         })
     }
 
@@ -534,9 +533,9 @@ fn parse_json_bytes(bytes: &[u8]) -> Option<Value> {
 /// Decode an optional base64-encoded string field from a QGA response.
 fn decode_b64_field(value: &Value, field: &str) -> Result<Vec<u8>, GaError> {
     match value.get(field).and_then(|v| v.as_str()) {
-        Some(encoded) => BASE64.decode(encoded).map_err(|e| {
-            GaError::Protocol(format!("invalid base64 in {field}: {e}"))
-        }),
+        Some(encoded) => BASE64
+            .decode(encoded)
+            .map_err(|e| GaError::Protocol(format!("invalid base64 in {field}: {e}"))),
         None => Ok(Vec::new()),
     }
 }

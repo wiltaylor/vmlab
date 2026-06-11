@@ -127,11 +127,7 @@ impl QmpClient {
     /// Sends `{"execute": command, "arguments": args, "id": n}` and waits
     /// for the response carrying the same id. A QMP-level
     /// `{"error": {...}}` becomes [`QmpError::Command`].
-    pub async fn execute(
-        &self,
-        command: &str,
-        args: Option<Value>,
-    ) -> Result<Value, QmpError> {
+    pub async fn execute(&self, command: &str, args: Option<Value>) -> Result<Value, QmpError> {
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         let mut msg = json!({"execute": command, "id": id});
         if let Some(arguments) = args {
@@ -242,11 +238,7 @@ impl QmpClient {
     /// `keys` are QMP qcode names (e.g. `["ctrl", "alt", "delete"]`); they
     /// are pressed in order, held for `hold_time_ms` (QEMU default 100ms),
     /// and released in reverse order.
-    pub async fn send_key(
-        &self,
-        keys: &[&str],
-        hold_time_ms: Option<u32>,
-    ) -> Result<(), QmpError> {
+    pub async fn send_key(&self, keys: &[&str], hold_time_ms: Option<u32>) -> Result<(), QmpError> {
         let key_values: Vec<Value> = keys
             .iter()
             .map(|k| json!({"type": "qcode", "data": k}))

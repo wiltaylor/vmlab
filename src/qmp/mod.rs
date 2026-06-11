@@ -13,8 +13,14 @@ mod client;
 mod error;
 mod types;
 
+// Re-exported for the lab daemon's power/input/snapshot machinery; not
+// all of it is consumed yet during buildout (cf. `#![allow(dead_code)]`
+// at the crate root).
+#[allow(unused_imports)]
 pub use client::QmpClient;
+#[allow(unused_imports)]
 pub use error::QmpError;
+#[allow(unused_imports)]
 pub use types::{EventTimestamp, NamedBlockNode, QmpEvent, RunState};
 
 #[cfg(test)]
