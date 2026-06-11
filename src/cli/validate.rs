@@ -15,7 +15,9 @@ pub struct HostContext {
 
 impl HostContext {
     pub fn new() -> Result<Self> {
-        Ok(Self { profiles: crate::profiles::ProfileSet::load_default()? })
+        Ok(Self {
+            profiles: crate::profiles::ProfileSet::load_default()?,
+        })
     }
 }
 
@@ -42,18 +44,25 @@ impl ValidationContext for HostContext {
 }
 
 pub fn cmd_validate() -> Result<()> {
+    let file = validate_current()?;
+    println!(
+        "ok: lab \"{}\" — {} vm(s), {} segment(s)",
+        file.lab.name,
+        file.lab.vms.len(),
+        file.lab.segments.len()
+    );
+    Ok(())
+}
+
+/// Full validation of the cwd's lab; every side-effecting verb runs this
+/// first (PRD §5.1: implicitly every other verb).
+pub fn validate_current() -> Result<crate::config::LabFile> {
     let cwd = std::env::current_dir()?;
     let root = crate::paths::find_lab_root(&cwd)?;
     let file = config::load_lab_root(&root).map_err(miette_to_anyhow)?;
     let issues = config::validate(&file, &HostContext::new()?);
     if issues.is_empty() {
-        println!(
-            "ok: lab \"{}\" — {} vm(s), {} segment(s)",
-            file.lab.name,
-            file.lab.vms.len(),
-            file.lab.segments.len()
-        );
-        return Ok(());
+        return Ok(file);
     }
     let path = root.join(crate::paths::LAB_FILE);
     let source = std::fs::read_to_string(&path).unwrap_or_default();

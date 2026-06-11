@@ -67,7 +67,9 @@ pub async fn ensure_lab_daemon(name: &str, root: &std::path::Path) -> Result<Cli
         .await
         .map_err(|e| anyhow::anyhow!("starting lab daemon: {e}"))?;
     let sock = PathBuf::from(
-        resp["socket"].as_str().context("malformed lab.ensure response")?,
+        resp["socket"]
+            .as_str()
+            .context("malformed lab.ensure response")?,
     );
     Ok(Client::connect(&sock).await?)
 }
@@ -96,7 +98,10 @@ pub fn cmd_daemon(cmd: DaemonCmd) -> Result<()> {
         match cmd {
             DaemonCmd::Start => {
                 ensure_supervisor().await?;
-                println!("vmlabd running at {}", crate::paths::supervisor_socket().display());
+                println!(
+                    "vmlabd running at {}",
+                    crate::paths::supervisor_socket().display()
+                );
                 Ok(())
             }
             DaemonCmd::Stop => {
@@ -122,7 +127,11 @@ pub fn cmd_daemon(cmd: DaemonCmd) -> Result<()> {
                             .call("status", Value::Null)
                             .await
                             .map_err(|e| anyhow::anyhow!("{e}"))?;
-                        println!("vmlabd {} at {}", version.as_str().unwrap_or("?"), sock.display());
+                        println!(
+                            "vmlabd {} at {}",
+                            version.as_str().unwrap_or("?"),
+                            sock.display()
+                        );
                         let entries = labs.as_array().cloned().unwrap_or_default();
                         if entries.is_empty() {
                             println!("no lab daemons");

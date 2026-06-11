@@ -1,19 +1,25 @@
 //! QEMU (and swtpm) process management: spawn with logs, watch for exit,
 //! kill. Graceful-stop policy lives in the lab daemon's lifecycle (§7.2);
 //! this layer is mechanics only.
+//!
+//! The waiter task owns the `Child` exclusively (holding a lock across
+//! `child.wait()` would deadlock `kill()`); killing goes through a signal to
+//! the recorded pid instead.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use anyhow::{Context, Result};
-use tokio::process::{Child, Command};
-use tokio::sync::{Mutex, watch};
+use tokio::process::Command;
+use tokio::sync::watch;
 
 /// A spawned VM (or helper) process.
 pub struct Proc {
     pub name: String,
-    child: Mutex<Option<Child>>,
+    /// 0 once the process has been reaped.
+    pid: AtomicU32,
     /// Becomes Some(status_string) when the process exits.
     exited: watch::Receiver<Option<String>>,
 }
@@ -36,7 +42,7 @@ impl Proc {
             .with_context(|| format!("opening {}", log_path.display()))?;
         let log_err = log.try_clone()?;
 
-        let child = Command::new(binary)
+        let mut child = Command::new(binary)
             .args(args)
             .stdin(Stdio::null())
             .stdout(log)
@@ -48,30 +54,31 @@ impl Proc {
         let (tx, rx) = watch::channel(None);
         let proc = Arc::new(Proc {
             name: name.to_string(),
-            child: Mutex::new(Some(child)),
+            pid: AtomicU32::new(child.id().unwrap_or(0)),
             exited: rx,
         });
 
-        // Waiter task: reap and publish the exit status.
+        // Waiter task: sole owner of the Child; reaps and publishes the
+        // exit status.
         let watcher = proc.clone();
         tokio::spawn(async move {
-            let mut guard = watcher.child.lock().await;
-            if let Some(child) = guard.as_mut() {
-                let status = child.wait().await;
-                let s = match status {
-                    Ok(st) => st.to_string(),
-                    Err(e) => format!("wait failed: {e}"),
-                };
-                *guard = None;
-                let _ = tx.send(Some(s));
-            }
+            let status = child.wait().await;
+            let s = match status {
+                Ok(st) => st.to_string(),
+                Err(e) => format!("wait failed: {e}"),
+            };
+            watcher.pid.store(0, Ordering::SeqCst);
+            let _ = tx.send(Some(s));
         });
 
         Ok(proc)
     }
 
-    pub async fn pid(&self) -> Option<u32> {
-        self.child.lock().await.as_ref().and_then(|c| c.id())
+    pub fn pid(&self) -> Option<u32> {
+        match self.pid.load(Ordering::SeqCst) {
+            0 => None,
+            p => Some(p),
+        }
     }
 
     pub fn is_running(&self) -> bool {
@@ -100,9 +107,21 @@ impl Proc {
 
     /// SIGKILL the process (the hard end of the §7.2 stop ladder).
     pub async fn kill(&self) {
-        let mut guard = self.child.lock().await;
-        if let Some(child) = guard.as_mut() {
-            let _ = child.start_kill();
+        if let Some(pid) = self.pid() {
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(pid as i32),
+                nix::sys::signal::Signal::SIGKILL,
+            );
+        }
+    }
+
+    /// SIGTERM (used for helpers like swtpm that exit cleanly on it).
+    pub async fn terminate(&self) {
+        if let Some(pid) = self.pid() {
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(pid as i32),
+                nix::sys::signal::Signal::SIGTERM,
+            );
         }
     }
 }
@@ -169,17 +188,21 @@ mod tests {
             .unwrap();
         assert!(status.contains('3'), "{status}");
         assert!(!p.is_running());
+        assert!(p.pid().is_none());
         let logged = std::fs::read_to_string(&log).unwrap();
         assert_eq!(logged.trim(), "hi");
     }
 
     #[tokio::test]
-    async fn kill_terminates() {
+    async fn kill_terminates_even_after_waiter_starts() {
         let tmp = tempfile::tempdir().unwrap();
         let p = Proc::spawn("t", "sleep", &["30".into()], &tmp.path().join("p.log"))
             .await
             .unwrap();
         assert!(p.is_running());
+        // Let the waiter task start waiting first — this order used to
+        // deadlock when the waiter held a lock across child.wait().
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         p.kill().await;
         let status = p
             .wait_exit(std::time::Duration::from_secs(5))

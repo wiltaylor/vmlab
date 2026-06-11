@@ -47,7 +47,9 @@ impl Client {
         let handle = tokio::spawn(async move {
             let mut lines = BufReader::new(read_half).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                let Ok(msg) = serde_json::from_str::<Message>(&line) else { continue };
+                let Ok(msg) = serde_json::from_str::<Message>(&line) else {
+                    continue;
+                };
                 match msg {
                     Message::Resp { id, ok, err } => {
                         if let Some(p) = reader_inner.pending.lock().await.remove(&id) {
@@ -61,7 +63,10 @@ impl Client {
                     }
                     Message::Stream { id, chunk } => {
                         let pending = reader_inner.pending.lock().await;
-                        if let Some(Pending { chunks: Some(tx), .. }) = pending.get(&id) {
+                        if let Some(Pending {
+                            chunks: Some(tx), ..
+                        }) = pending.get(&id)
+                        {
                             let _ = tx.try_send(chunk);
                         }
                     }
@@ -94,10 +99,18 @@ impl Client {
     ) -> Result<oneshot::Receiver<Result<Value, String>>, ProtoError> {
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
-        self.inner.pending.lock().await.insert(id, Pending { resp: tx, chunks });
-        let msg = Message::Req { id, cmd: cmd.to_string(), args };
-        let mut line = serde_json::to_string(&msg)
-            .map_err(|e| ProtoError::Protocol(e.to_string()))?;
+        self.inner
+            .pending
+            .lock()
+            .await
+            .insert(id, Pending { resp: tx, chunks });
+        let msg = Message::Req {
+            id,
+            cmd: cmd.to_string(),
+            args,
+        };
+        let mut line =
+            serde_json::to_string(&msg).map_err(|e| ProtoError::Protocol(e.to_string()))?;
         line.push('\n');
         let mut w = self.inner.write.lock().await;
         w.write_all(line.as_bytes()).await?;
@@ -195,7 +208,10 @@ mod tests {
     #[tokio::test]
     async fn request_response() {
         let (_dir, _server, client) = start().await;
-        let v = client.call("echo", serde_json::json!({"x": 42})).await.unwrap();
+        let v = client
+            .call("echo", serde_json::json!({"x": 42}))
+            .await
+            .unwrap();
         assert_eq!(v["x"], 42);
     }
 
@@ -240,7 +256,11 @@ mod tests {
     async fn events_flow_after_subscribe() {
         let (_dir, server, client) = start().await;
         let mut rx = client.subscribe().await.unwrap();
-        server.emit(Event::new("vm.ready", "lab1", serde_json::json!({"vm": "dc01"})));
+        server.emit(Event::new(
+            "vm.ready",
+            "lab1",
+            serde_json::json!({"vm": "dc01"}),
+        ));
         let ev = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
             .await
             .unwrap()

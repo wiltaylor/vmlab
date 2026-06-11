@@ -2,6 +2,7 @@
 //! daemons via hidden subcommands, re-exec'd from the CLI as needed.
 
 pub mod daemon;
+mod lab;
 mod validate;
 
 use clap::{Parser, Subcommand};
@@ -16,8 +17,73 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Create/start the lab (or a subset of VMs), run provision scripts
+    Up {
+        /// VMs to bring up (default: all)
+        vms: Vec<String>,
+    },
+    /// Graceful stop; clones retained
+    Down {
+        /// VMs to stop (default: all)
+        vms: Vec<String>,
+        /// Hard kill instead of the graceful ladder
+        #[arg(long)]
+        force: bool,
+    },
+    /// Stop the lab and delete clones, lab-local state, dynamic net config
+    Destroy,
+    /// Lab/VM/segment state, IPs, ready flags
+    Status,
     /// Validate the lab file with no side effects
     Validate,
+    /// Start one VM
+    Start { vm: String },
+    /// Stop one VM (graceful ladder; --force to kill)
+    Stop {
+        vm: String,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Restart one VM
+    Restart { vm: String },
+    /// Take a snapshot of one VM, or lab-wide with no VM
+    Snapshot {
+        /// Snapshot name
+        name: String,
+        /// VM ([lab/]vm); omitted = every VM in the lab
+        #[arg(long)]
+        vm: Option<String>,
+    },
+    /// Restore a snapshot (resumes running iff it was taken online)
+    Restore {
+        /// Snapshot name
+        name: String,
+        /// VM ([lab/]vm); omitted = every VM in the lab
+        #[arg(long)]
+        vm: Option<String>,
+    },
+    /// List a VM's snapshots
+    Snapshots { vm: String },
+    /// Delete a VM snapshot
+    SnapshotDelete { vm: String, name: String },
+    /// Run a command in the guest via the agent
+    Exec {
+        vm: String,
+        /// Command and arguments (after --)
+        #[arg(last = true)]
+        cmd: Vec<String>,
+    },
+    /// Tail or dump JSON-line logs for the lab or one VM
+    Logs {
+        /// [lab/][vm] (default: the cwd's lab)
+        target: Option<String>,
+        /// Keep following
+        #[arg(short, long)]
+        follow: bool,
+        /// Lines of history to show
+        #[arg(short = 'n', long, default_value_t = 100)]
+        lines: usize,
+    },
     /// Supervisor control (normally automatic)
     Daemon {
         #[command(subcommand)]
@@ -41,7 +107,24 @@ pub enum Command {
 pub fn run() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Validate => validate::cmd_validate(),
+        Command::Up { vms } => lab::cmd_up(vms),
+        Command::Down { vms, force } => lab::cmd_down(vms, force),
+        Command::Destroy => lab::cmd_destroy(),
+        Command::Status => lab::cmd_status(),
+        Command::Validate => validate::cmd_validate().map(|_| ()),
+        Command::Start { vm } => lab::cmd_vm_power(&vm, "start", false),
+        Command::Stop { vm, force } => lab::cmd_vm_power(&vm, "stop", force),
+        Command::Restart { vm } => lab::cmd_vm_power(&vm, "restart", false),
+        Command::Snapshot { name, vm } => lab::cmd_snapshot(vm, name),
+        Command::Restore { name, vm } => lab::cmd_restore(vm, name),
+        Command::Snapshots { vm } => lab::cmd_snapshots(&vm),
+        Command::SnapshotDelete { vm, name } => lab::cmd_snapshot_delete(&vm, name),
+        Command::Exec { vm, cmd } => lab::cmd_exec(&vm, cmd),
+        Command::Logs {
+            target,
+            follow,
+            lines,
+        } => lab::cmd_logs(target, follow, lines),
         Command::Daemon { cmd } => daemon::cmd_daemon(cmd),
         Command::Supervisord => {
             init_daemon_tracing();

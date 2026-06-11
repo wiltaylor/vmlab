@@ -110,6 +110,56 @@ pub async fn resize(path: &Path, new_size: u64) -> Result<()> {
     Ok(())
 }
 
+/// Convert any image (e.g. a raw FAT volume) to qcow2.
+pub async fn convert_to_qcow2(src: &Path, dest: &Path) -> Result<()> {
+    let src = path_str(src);
+    let dest = path_str(dest);
+    run(&["convert", "-O", "qcow2", &src, &dest]).await?;
+    Ok(())
+}
+
+/// Create a qcow2-internal snapshot on a powered-off image (PRD §7.3
+/// offline snapshots).
+pub async fn snapshot_create(path: &Path, name: &str) -> Result<()> {
+    let path = path_str(path);
+    run(&["snapshot", "-c", name, &path]).await?;
+    Ok(())
+}
+
+/// Apply (revert to) a qcow2-internal snapshot.
+pub async fn snapshot_apply(path: &Path, name: &str) -> Result<()> {
+    let path = path_str(path);
+    run(&["snapshot", "-a", name, &path]).await?;
+    Ok(())
+}
+
+/// Delete a qcow2-internal snapshot.
+pub async fn snapshot_delete(path: &Path, name: &str) -> Result<()> {
+    let path = path_str(path);
+    run(&["snapshot", "-d", name, &path]).await?;
+    Ok(())
+}
+
+/// List qcow2-internal snapshot tags.
+pub async fn snapshot_list(path: &Path) -> Result<Vec<String>> {
+    let path_arg = path_str(path);
+    let stdout = run(&["info", "--output=json", &path_arg]).await?;
+    #[derive(Deserialize)]
+    struct Info {
+        #[serde(default)]
+        snapshots: Vec<Snap>,
+    }
+    #[derive(Deserialize)]
+    struct Snap {
+        name: String,
+    }
+    let info: Info = serde_json::from_slice(&stdout).map_err(|e| QemuImgError::Parse {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    Ok(info.snapshots.into_iter().map(|s| s.name).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

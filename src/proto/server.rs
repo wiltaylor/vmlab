@@ -21,7 +21,13 @@ pub struct Streamer {
 
 impl Streamer {
     pub async fn chunk(&self, text: impl Into<String>) {
-        let _ = self.tx.send(Message::Stream { id: self.id, chunk: text.into() }).await;
+        let _ = self
+            .tx
+            .send(Message::Stream {
+                id: self.id,
+                chunk: text.into(),
+            })
+            .await;
     }
 }
 
@@ -41,12 +47,22 @@ impl Server {
     /// Bind `path` (parent dirs created, stale socket file replaced) and
     /// serve until dropped/aborted.
     pub async fn bind(path: &Path, handler: Arc<dyn Handler>) -> std::io::Result<Server> {
+        let (events, _) = broadcast::channel::<Event>(1024);
+        Self::bind_with_events(path, handler, events).await
+    }
+
+    /// [`bind`](Self::bind) with a caller-supplied event channel, so the
+    /// daemon can emit events without holding the server.
+    pub async fn bind_with_events(
+        path: &Path,
+        handler: Arc<dyn Handler>,
+        events: broadcast::Sender<Event>,
+    ) -> std::io::Result<Server> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let _ = std::fs::remove_file(path);
         let listener = UnixListener::bind(path)?;
-        let (events, _) = broadcast::channel::<Event>(1024);
         let events_accept = events.clone();
         let handle = tokio::spawn(async move {
             loop {
@@ -116,7 +132,11 @@ async fn serve_conn(
             Ok(m) => m,
             Err(e) => {
                 let _ = out_tx
-                    .send(Message::Resp { id: 0, ok: None, err: Some(format!("bad message: {e}")) })
+                    .send(Message::Resp {
+                        id: 0,
+                        ok: None,
+                        err: Some(format!("bad message: {e}")),
+                    })
                     .await;
                 continue;
             }
@@ -135,7 +155,14 @@ async fn serve_conn(
                     match rx.recv().await {
                         Ok(ev) => {
                             let data = serde_json::to_value(&ev).unwrap_or(Value::Null);
-                            if tx.send(Message::Event { event: ev.event.clone(), data }).await.is_err() {
+                            if tx
+                                .send(Message::Event {
+                                    event: ev.event.clone(),
+                                    data,
+                                })
+                                .await
+                                .is_err()
+                            {
                                 break;
                             }
                         }
@@ -144,19 +171,36 @@ async fn serve_conn(
                     }
                 }
             }));
-            let _ = out_tx.send(Message::Resp { id, ok: Some(Value::Bool(true)), err: None }).await;
+            let _ = out_tx
+                .send(Message::Resp {
+                    id,
+                    ok: Some(Value::Bool(true)),
+                    err: None,
+                })
+                .await;
             continue;
         }
 
-        let streamer = Streamer { id, tx: out_tx.clone() };
+        let streamer = Streamer {
+            id,
+            tx: out_tx.clone(),
+        };
         let handler = handler.clone();
         let out = out_tx.clone();
         // Handle each request on its own task so a long build doesn't block
         // a status query on the same connection.
         tokio::spawn(async move {
             let resp = match handler.handle(&cmd, args, &streamer).await {
-                Ok(v) => Message::Resp { id, ok: Some(v), err: None },
-                Err(e) => Message::Resp { id, ok: None, err: Some(e) },
+                Ok(v) => Message::Resp {
+                    id,
+                    ok: Some(v),
+                    err: None,
+                },
+                Err(e) => Message::Resp {
+                    id,
+                    ok: None,
+                    err: Some(e),
+                },
             };
             let _ = out.send(resp).await;
         });

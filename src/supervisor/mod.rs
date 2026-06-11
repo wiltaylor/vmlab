@@ -150,7 +150,9 @@ impl Supervisor {
             let status = child.wait().await;
             let expected = {
                 let reg = sup.registry.lock().await;
-                reg.get(&lab_name).map(|e| e.state == LabState::Stopping).unwrap_or(true)
+                reg.get(&lab_name)
+                    .map(|e| e.state == LabState::Stopping)
+                    .unwrap_or(true)
             };
             if expected {
                 let mut reg = sup.registry.lock().await;
@@ -181,8 +183,12 @@ impl Supervisor {
         let sock = crate::paths::lab_socket(&lab);
         let sup = self.clone();
         tokio::spawn(async move {
-            let Ok(client) = Client::connect(&sock).await else { return };
-            let Ok(mut rx) = client.subscribe().await else { return };
+            let Ok(client) = Client::connect(&sock).await else {
+                return;
+            };
+            let Ok(mut rx) = client.subscribe().await else {
+                return;
+            };
             while let Some(ev) = rx.recv().await {
                 sup.emit(ev);
             }

@@ -9,10 +9,10 @@
 pub mod dhcp;
 pub mod dns;
 pub mod frame;
+pub mod framing;
 pub mod gateway;
 pub mod nat;
 pub mod rules;
-pub mod framing;
 pub mod switch;
 
 // Re-exports for consumers (DHCP/DNS/NAT/daemon modules); nothing inside the

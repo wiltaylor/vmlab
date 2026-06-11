@@ -69,7 +69,9 @@ pub struct ProfileSet {
 impl ProfileSet {
     /// Shipped profiles only.
     pub fn shipped() -> Result<Self> {
-        let mut set = Self { profiles: BTreeMap::new() };
+        let mut set = Self {
+            profiles: BTreeMap::new(),
+        };
         set.merge_source(SHIPPED_PROFILES_WCL, "<shipped profiles>")?;
         Ok(set)
     }
@@ -167,9 +169,9 @@ fn parse_profiles(source: &str, name: &str) -> Result<Vec<Profile>> {
                 Some(f) => match f.value() {
                     Ok(Value::Utf8(s)) => Ok(Some(s.clone())),
                     Ok(Value::None) => Ok(None),
-                    Ok(other) => {
-                        Err(anyhow!("profile {pname}: `{field}` must be a string, got {other:?}"))
-                    }
+                    Ok(other) => Err(anyhow!(
+                        "profile {pname}: `{field}` must be a string, got {other:?}"
+                    )),
                     Err(e) => Err(anyhow!("profile {pname}: cannot evaluate `{field}`: {e}")),
                 },
             }
@@ -180,9 +182,9 @@ fn parse_profiles(source: &str, name: &str) -> Result<Vec<Profile>> {
                 Some(f) => match f.value() {
                     Ok(Value::Bool(b)) => Ok(Some(*b)),
                     Ok(Value::None) => Ok(None),
-                    Ok(other) => {
-                        Err(anyhow!("profile {pname}: `{field}` must be a bool, got {other:?}"))
-                    }
+                    Ok(other) => Err(anyhow!(
+                        "profile {pname}: `{field}` must be a bool, got {other:?}"
+                    )),
                     Err(e) => Err(anyhow!("profile {pname}: cannot evaluate `{field}`: {e}")),
                 },
             }
@@ -271,7 +273,10 @@ mod tests {
             "linux-generic",
             "custom",
         ] {
-            assert!(names.contains(&expected), "missing shipped profile {expected}");
+            assert!(
+                names.contains(&expected),
+                "missing shipped profile {expected}"
+            );
         }
 
         let win11 = set.get("windows-11").unwrap();
@@ -306,7 +311,10 @@ profile "freebsd" { machine = "q35" firmware = "seabios" }
         .unwrap();
         let set = ProfileSet::load(tmp.path()).unwrap();
         // Override replaces the shipped definition entirely.
-        assert_eq!(set.get("windows-11").unwrap().machine, Some(Machine::I440fx));
+        assert_eq!(
+            set.get("windows-11").unwrap().machine,
+            Some(Machine::I440fx)
+        );
         assert!(set.get("windows-11").unwrap().firmware.is_none());
         // Extension adds a new name.
         assert!(set.exists("freebsd"));

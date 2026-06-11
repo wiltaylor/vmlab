@@ -14,7 +14,12 @@ use serde_json::Value;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Message {
     /// Client → server command.
-    Req { id: u64, cmd: String, #[serde(default)] args: Value },
+    Req {
+        id: u64,
+        cmd: String,
+        #[serde(default)]
+        args: Value,
+    },
     /// Server → client final answer for `id`.
     Resp {
         id: u64,
@@ -45,7 +50,12 @@ pub struct Event {
 
 impl Event {
     pub fn new(event: impl Into<String>, lab: impl Into<String>, data: Value) -> Self {
-        Self { event: event.into(), lab: lab.into(), data, ts: chrono::Utc::now() }
+        Self {
+            event: event.into(),
+            lab: lab.into(),
+            data,
+            ts: chrono::Utc::now(),
+        }
     }
 }
 
@@ -67,7 +77,11 @@ mod tests {
 
     #[test]
     fn message_round_trip() {
-        let m = Message::Req { id: 7, cmd: "status".into(), args: serde_json::json!({"a": 1}) };
+        let m = Message::Req {
+            id: 7,
+            cmd: "status".into(),
+            args: serde_json::json!({"a": 1}),
+        };
         let line = serde_json::to_string(&m).unwrap();
         let back: Message = serde_json::from_str(&line).unwrap();
         match back {
@@ -82,7 +96,11 @@ mod tests {
 
     #[test]
     fn resp_omits_empty_sides() {
-        let m = Message::Resp { id: 1, ok: Some(serde_json::json!(true)), err: None };
+        let m = Message::Resp {
+            id: 1,
+            ok: Some(serde_json::json!(true)),
+            err: None,
+        };
         let line = serde_json::to_string(&m).unwrap();
         assert!(!line.contains("err"));
     }
