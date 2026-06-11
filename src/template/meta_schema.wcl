@@ -1,0 +1,28 @@
+// Schema for template store metadata (`template.wcl`, PRD §6.1, §6.2).
+//
+// Store metadata files opt in with `import <vmlab-meta.wcl>` at the top.
+// One `template_meta` block per file; sizes are human strings ("8G")
+// parsed by crate::config::model::parse_size.
+
+@document
+type MetaDoc {
+  @children("template_meta") metas: list<TemplateMeta>
+}
+
+@block("template_meta")
+type TemplateMeta {
+  @inline(0) name: utf8
+  arch: utf8
+  version: utf8
+  profile: utf8?
+  cpus: i64?
+  memory: utf8?       // RAM, "8G" style
+  disk: utf8?         // primary disk virtual size, "64G" style
+  firmware: utf8?
+  tpm: bool?
+  secure_boot: bool?
+  display: utf8?
+  created: utf8       // RFC 3339
+  origin: utf8?       // source ISO URL / registry reference
+  sha256: utf8?       // hex digest of disk.qcow2
+}
