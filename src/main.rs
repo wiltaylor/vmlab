@@ -9,6 +9,7 @@ mod net;
 mod paths;
 mod profiles;
 mod proto;
+mod qemu;
 mod qga;
 mod qmp;
 mod supervisor;

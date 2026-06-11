@@ -1,0 +1,411 @@
+//! Build the QEMU argv for one VM (PRD §3, §5.2). Pure function of the
+//! resolved hardware + runtime paths, so it is exhaustively unit-testable.
+//! `qemu_args` from the lab file are appended verbatim, last, so they win.
+
+use std::path::{Path, PathBuf};
+
+use anyhow::Result;
+
+use super::firmware;
+use super::resolve::ResolvedVm;
+use crate::config::model::{GpuMode, MacAddr};
+use crate::profiles::{DiskBus, FirmwareKind};
+
+/// Per-VM runtime paths and attachments supplied by the lab daemon.
+#[derive(Debug, Clone, Default)]
+pub struct VmPaths {
+    pub qmp_sock: PathBuf,
+    pub qga_sock: PathBuf,
+    pub vnc_sock: PathBuf,
+    /// Primary disk qcow2 (linked clone or blank).
+    pub primary_disk: PathBuf,
+    /// Additional disks in declaration order: (name, path).
+    pub extra_disks: Vec<(String, PathBuf)>,
+    /// CD-ROM attachments (paths to ISOs, including built media).
+    pub cdroms: Vec<PathBuf>,
+    /// Floppy attachment.
+    pub floppy: Option<PathBuf>,
+    /// One unix socket per NIC, in declaration order, with its MAC.
+    pub nics: Vec<(MacAddr, PathBuf)>,
+    /// Writable OVMF VARS copy for this VM (created by the lab daemon from
+    /// the template in `firmware::UefiFirmware::vars_template`).
+    pub ovmf_vars: Option<PathBuf>,
+    /// swtpm control socket (when tpm enabled).
+    pub tpm_sock: Option<PathBuf>,
+    /// Serial console log file.
+    pub serial_log: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Accel {
+    Kvm,
+    Tcg,
+}
+
+/// Pick the accelerator: KVM when /dev/kvm is usable and the target arch is
+/// the host arch; TCG otherwise — slow but functional, warn loudly (PRD §14).
+pub fn pick_accel(arch: &str) -> Accel {
+    let host = std::env::consts::ARCH;
+    let kvm = Path::new("/dev/kvm").exists();
+    if kvm && arch == host {
+        Accel::Kvm
+    } else {
+        Accel::Tcg
+    }
+}
+
+pub fn emulator_binary(arch: &str) -> String {
+    format!("qemu-system-{arch}")
+}
+
+/// Build the full argv (excluding argv[0], which is `emulator_binary`).
+pub fn build_args(
+    lab: &str,
+    vm: &ResolvedVm,
+    paths: &VmPaths,
+    accel: Accel,
+) -> Result<Vec<String>> {
+    fn arg(a: &mut Vec<String>, s: &str, v: String) {
+        a.push(format!("-{s}"));
+        a.push(v);
+    }
+    let mut a: Vec<String> = Vec::new();
+
+    arg(&mut a, "name", format!("vmlab:{lab}/{}", vm.name));
+    arg(&mut a, "machine", vm.machine.clone());
+    match accel {
+        Accel::Kvm => {
+            arg(&mut a, "accel", "kvm".into());
+            // `host` exposes everything incl. VMX/SVM for nested (§5.2).
+            arg(&mut a, "cpu", "host".into());
+        }
+        Accel::Tcg => {
+            arg(&mut a, "accel", "tcg".into());
+            arg(&mut a, "cpu", "max".into());
+        }
+    }
+    arg(&mut a, "smp", vm.cpus.to_string());
+    arg(&mut a, "m", format!("{}M", vm.memory >> 20));
+
+    // Headless with a VNC display always available (§11).
+    arg(&mut a, "display", "none".into());
+    arg(&mut a, "vnc", format!("unix:{}", paths.vnc_sock.display()));
+
+    arg(
+        &mut a,
+        "qmp",
+        format!("unix:{},server=on,wait=off", paths.qmp_sock.display()),
+    );
+    a.push("-monitor".into());
+    a.push("none".into());
+
+    if let Some(log) = &paths.serial_log {
+        arg(&mut a, "serial", format!("file:{}", log.display()));
+    }
+
+    // UEFI firmware: CODE read-only pflash + per-VM writable VARS.
+    if vm.firmware == Some(FirmwareKind::Ovmf) {
+        let fw = match vm.arch.as_str() {
+            "x86_64" => firmware::ovmf_x86_64(vm.secure_boot)?,
+            "aarch64" => firmware::uefi_aarch64()?,
+            other => anyhow::bail!("no UEFI firmware lookup for arch {other}"),
+        };
+        arg(
+            &mut a,
+            "drive",
+            format!(
+                "if=pflash,format=raw,readonly=on,file={}",
+                fw.code.display()
+            ),
+        );
+        let vars = paths
+            .ovmf_vars
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("OVMF requires a per-VM VARS path"))?;
+        arg(
+            &mut a,
+            "drive",
+            format!("if=pflash,format=raw,file={}", vars.display()),
+        );
+        if vm.secure_boot && vm.arch == "x86_64" {
+            // SMM is required for the secboot build to enforce anything.
+            a.push("-global".into());
+            a.push("driver=cfi.pflash01,property=secure,value=on".into());
+        }
+    }
+    // SeaBIOS is the QEMU default on x86 — nothing to add.
+
+    // Guest agent virtio-serial channel (§7.4).
+    if vm.agent_channel {
+        arg(
+            &mut a,
+            "chardev",
+            format!(
+                "socket,id=qga0,path={},server=on,wait=off",
+                paths.qga_sock.display()
+            ),
+        );
+        arg(&mut a, "device", "virtio-serial-pci".into());
+        arg(
+            &mut a,
+            "device",
+            "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0".into(),
+        );
+    }
+
+    // Primary + extra disks: explicit blockdev node names (disk0, disk1, …)
+    // so QMP snapshot commands can address them (§7.3).
+    let mut disk_index = 0usize;
+    let mut add_disk = |a: &mut Vec<String>, path: &Path, bus: DiskBus| {
+        let node = format!("disk{disk_index}");
+        a.push("-blockdev".into());
+        a.push(format!(
+            "driver=qcow2,node-name={node},file.driver=file,file.filename={}",
+            path.display()
+        ));
+        a.push("-device".into());
+        match bus {
+            DiskBus::Virtio => a.push(format!("virtio-blk-pci,drive={node}")),
+            DiskBus::Ide | DiskBus::Sata => a.push(format!("ide-hd,drive={node}")),
+        }
+        disk_index += 1;
+    };
+    add_disk(&mut a, &paths.primary_disk, vm.disk_bus);
+    for (_, path) in &paths.extra_disks {
+        add_disk(&mut a, path, vm.disk_bus);
+    }
+
+    // CD-ROMs ride IDE/SATA on every profile — universally bootable.
+    for (i, iso) in paths.cdroms.iter().enumerate() {
+        a.push("-blockdev".into());
+        a.push(format!(
+            "driver=raw,node-name=cd{i},read-only=on,file.driver=file,file.filename={}",
+            iso.display()
+        ));
+        a.push("-device".into());
+        a.push(format!("ide-cd,drive=cd{i}"));
+    }
+
+    if let Some(floppy) = &paths.floppy {
+        arg(
+            &mut a,
+            "drive",
+            format!("if=floppy,format=raw,file={}", floppy.display()),
+        );
+    }
+
+    // NICs: stream-socket netdevs into the segment switch (§9.1). The
+    // daemon listens; QEMU connects.
+    for (i, (mac, sock)) in paths.nics.iter().enumerate() {
+        arg(
+            &mut a,
+            "netdev",
+            format!(
+                "stream,id=net{i},server=off,addr.type=unix,addr.path={}",
+                sock.display()
+            ),
+        );
+        arg(
+            &mut a,
+            "device",
+            format!("{},netdev=net{i},mac={mac}", vm.nic_model),
+        );
+    }
+    if paths.nics.is_empty() {
+        // No nic blocks = no network hardware at all (§5.2).
+        a.push("-nic".into());
+        a.push("none".into());
+    }
+
+    // TPM via swtpm (§5.3).
+    if let Some(tpm_sock) = &paths.tpm_sock {
+        arg(
+            &mut a,
+            "chardev",
+            format!("socket,id=chrtpm,path={}", tpm_sock.display()),
+        );
+        arg(&mut a, "tpmdev", "emulator,id=tpm0,chardev=chrtpm".into());
+        let dev = if vm.arch == "x86_64" {
+            "tpm-tis"
+        } else {
+            "tpm-tis-device"
+        };
+        arg(&mut a, "device", format!("{dev},tpmdev=tpm0"));
+    }
+
+    // Display device / GPU modes (§5.2). Paravirt GL renders host-side with
+    // the framebuffer scraped for VNC (egl-headless path).
+    match &vm.gpu {
+        Some(gpu) => match gpu.mode {
+            GpuMode::Passthrough => {
+                let addr = gpu.address.as_deref().expect("validated");
+                arg(&mut a, "device", format!("vfio-pci,host={addr}"));
+                if let Some(d) = &vm.display_device {
+                    arg(&mut a, "device", d.clone());
+                }
+            }
+            GpuMode::Virgl => {
+                arg(&mut a, "device", "virtio-gpu-gl".into());
+                arg(&mut a, "display", "egl-headless".into());
+            }
+            GpuMode::Vulkan => {
+                arg(
+                    &mut a,
+                    "device",
+                    "virtio-gpu-gl,venus=true,hostmem=4G".into(),
+                );
+                arg(&mut a, "display", "egl-headless".into());
+            }
+        },
+        None => {
+            if let Some(d) = &vm.display_device {
+                arg(&mut a, "device", d.clone());
+            }
+        }
+    }
+
+    // USB tablet: absolute pointer events for screen automation (§10.3).
+    a.push("-usb".into());
+    arg(&mut a, "device", "usb-tablet".into());
+
+    // Don't start the guest CPU until the daemon says go — lets the switch
+    // ports and QMP attach race-free.
+    a.push("-S".into());
+
+    // Escape hatch, verbatim, last so it wins (§5.2).
+    a.extend(vm.qemu_args.iter().cloned());
+
+    Ok(a)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::profiles::ProfileSet;
+
+    fn resolved(profile: &str, arch: &str) -> ResolvedVm {
+        let profiles = ProfileSet::shipped().unwrap();
+        let p = profiles.get(profile).unwrap();
+        ResolvedVm {
+            name: "t".into(),
+            arch: arch.into(),
+            cpus: 2,
+            memory: 2 << 30,
+            machine: if arch == "x86_64" {
+                p.machine
+                    .map(|m| m.qemu_name().to_string())
+                    .unwrap_or("q35".into())
+            } else {
+                "virt".into()
+            },
+            firmware: p.firmware,
+            secure_boot: p.secure_boot.unwrap_or(false),
+            tpm: p.tpm.unwrap_or(false),
+            disk_bus: p.disk_bus.unwrap_or(crate::profiles::DiskBus::Virtio),
+            nic_model: p.nic_model.clone().unwrap_or("virtio-net-pci".into()),
+            display_device: p.display.clone().map(|d| match d.as_str() {
+                "qxl" => "qxl-vga".to_string(),
+                "virtio-gpu" => "virtio-gpu-pci".to_string(),
+                "std" => "VGA".to_string(),
+                o => o.to_string(),
+            }),
+            agent_channel: true,
+            nested: false,
+            gpu: None,
+            qemu_args: vec![],
+        }
+    }
+
+    fn paths() -> VmPaths {
+        VmPaths {
+            qmp_sock: "/run/l/t/qmp.sock".into(),
+            qga_sock: "/run/l/t/qga.sock".into(),
+            vnc_sock: "/run/l/t/vnc.sock".into(),
+            primary_disk: "/lab/.vmlab/t/disk0.qcow2".into(),
+            nics: vec![(
+                "52:54:00:00:00:01".parse().unwrap(),
+                PathBuf::from("/run/l/t/nic0.sock"),
+            )],
+            ..Default::default()
+        }
+    }
+
+    fn joined(args: &[String]) -> String {
+        args.join(" ")
+    }
+
+    #[test]
+    fn windows11_shape() {
+        let mut p = paths();
+        p.ovmf_vars = Some("/lab/.vmlab/t/OVMF_VARS.fd".into());
+        p.tpm_sock = Some("/run/l/t/tpm.sock".into());
+        let vm = resolved("windows-11", "x86_64");
+        let args = build_args("lab1", &vm, &p, Accel::Kvm).unwrap();
+        let s = joined(&args);
+        assert!(s.contains("-machine q35"));
+        assert!(s.contains("-accel kvm"));
+        assert!(s.contains("-cpu host"));
+        assert!(s.contains("if=pflash,format=raw,readonly=on"));
+        assert!(s.contains("secboot"), "secure boot firmware expected: {s}");
+        assert!(s.contains("driver=cfi.pflash01,property=secure,value=on"));
+        assert!(s.contains("virtio-blk-pci,drive=disk0"));
+        assert!(s.contains("tpm-tis,tpmdev=tpm0"));
+        assert!(s.contains("qxl-vga"));
+        assert!(s.contains("org.qemu.guest_agent.0"));
+        assert!(s.contains("netdev=net0,mac=52:54:00:00:00:01"));
+        assert!(s.contains("-vnc unix:/run/l/t/vnc.sock"));
+        assert!(s.contains("usb-tablet"));
+        assert!(args.last().unwrap() != "-S" || s.ends_with("-S"));
+    }
+
+    #[test]
+    fn legacy_shape() {
+        let vm = resolved("windows-legacy", "x86_64");
+        let args = build_args("lab1", &vm, &paths(), Accel::Kvm).unwrap();
+        let s = joined(&args);
+        assert!(s.contains("-machine pc"));
+        assert!(!s.contains("pflash"), "SeaBIOS must not add pflash: {s}");
+        assert!(s.contains("ide-hd,drive=disk0"));
+        assert!(s.contains("e1000,netdev=net0"));
+        assert!(s.contains("-device VGA"));
+        assert!(!s.contains("tpm"));
+    }
+
+    #[test]
+    fn no_nics_means_nic_none() {
+        let vm = resolved("linux-modern", "x86_64");
+        let mut p = paths();
+        p.nics.clear();
+        p.ovmf_vars = Some("/v".into());
+        let s = joined(&build_args("l", &vm, &p, Accel::Tcg).unwrap());
+        assert!(s.contains("-nic none"));
+        assert!(s.contains("-accel tcg"));
+        assert!(s.contains("-cpu max"));
+    }
+
+    #[test]
+    fn qemu_args_go_last() {
+        let mut vm = resolved("linux-generic", "x86_64");
+        vm.qemu_args = vec!["-device".into(), "weird-thing".into()];
+        let args = build_args("l", &vm, &paths(), Accel::Kvm).unwrap();
+        assert_eq!(
+            args[args.len() - 2..],
+            ["-device".to_string(), "weird-thing".to_string()]
+        );
+    }
+
+    #[test]
+    fn cdroms_and_floppy_attach() {
+        let vm = resolved("windows-legacy", "x86_64");
+        let mut p = paths();
+        p.cdroms = vec![
+            "/isos/win.iso".into(),
+            "/lab/.vmlab/media/unattend.iso".into(),
+        ];
+        p.floppy = Some("/lab/.vmlab/media/drivers.img".into());
+        let s = joined(&build_args("l", &vm, &p, Accel::Kvm).unwrap());
+        assert!(s.contains("ide-cd,drive=cd0"));
+        assert!(s.contains("ide-cd,drive=cd1"));
+        assert!(s.contains("if=floppy,format=raw,file=/lab/.vmlab/media/drivers.img"));
+    }
+}
