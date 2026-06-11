@@ -2,36 +2,36 @@
 main:
 	@just --list
 
-[group('build')]
 # Build the project (debug)
+[group('build')]
 build:
 	cargo build
 
-[group('build')]
 # Build release artifacts
+[group('build')]
 release:
 	cargo build --release
 
-[group('test')]
 # Run the test suite
+[group('test')]
 test:
 	cargo test
 
-[group('check')]
 # Run clippy with warnings as errors
+[group('check')]
 lint:
 	cargo clippy --all-targets -- -D warnings
 
-[group('check')]
 # Verify formatting without changing files
+[group('check')]
 fmt-check:
 	cargo fmt --check
 
-[group('check')]
 # Format the codebase
+[group('check')]
 fmt:
 	cargo fmt
 
-[group('check')]
 # Lint, format check, and tests
+[group('check')]
 check: lint fmt-check test
