@@ -1,0 +1,74 @@
+import <vmlab-profile.wcl>
+
+// Shipped guest OS profiles (PRD §5.3). Known-good hardware defaults;
+// values not set on the VM or template inherit from these. Override or
+// extend by dropping `*.wcl` files into `~/.config/vmlab/profiles/`.
+
+profile "windows-11" {
+  description = "Windows 11: q35, OVMF with secure boot, swtpm 2.0, virtio devices"
+  machine     = "q35"
+  firmware    = "ovmf"
+  secure_boot = true
+  tpm         = true
+  disk_bus    = "virtio"
+  nic_model   = "virtio-net-pci"
+  display     = "qxl"
+  cpus        = 4
+  memory      = "8G"
+}
+
+profile "windows-server" {
+  description = "Windows Server: q35, OVMF, swtpm 2.0, virtio devices"
+  machine     = "q35"
+  firmware    = "ovmf"
+  secure_boot = false
+  tpm         = true
+  disk_bus    = "virtio"
+  nic_model   = "virtio-net-pci"
+  display     = "qxl"
+  cpus        = 4
+  memory      = "8G"
+}
+
+profile "windows-legacy" {
+  description = "XP/7/2008-era guests with no virtio drivers: i440fx, SeaBIOS, IDE disk, e1000 NIC, std VGA"
+  machine     = "pc"
+  firmware    = "seabios"
+  secure_boot = false
+  tpm         = false
+  disk_bus    = "ide"
+  nic_model   = "e1000"
+  display     = "std"
+  cpus        = 2
+  memory      = "2G"
+}
+
+profile "linux-modern" {
+  description = "Modern Linux: q35, OVMF, virtio everything"
+  machine     = "q35"
+  firmware    = "ovmf"
+  secure_boot = false
+  tpm         = false
+  disk_bus    = "virtio"
+  nic_model   = "virtio-net-pci"
+  display     = "virtio-gpu"
+  cpus        = 2
+  memory      = "4G"
+}
+
+profile "linux-generic" {
+  description = "Older or unusual distros: q35, SeaBIOS, virtio disk/net, conservative elsewhere"
+  machine     = "q35"
+  firmware    = "seabios"
+  secure_boot = false
+  tpm         = false
+  disk_bus    = "virtio"
+  nic_model   = "virtio-net-pci"
+  display     = "std"
+  cpus        = 2
+  memory      = "2G"
+}
+
+profile "custom" {
+  description = "Nothing assumed — supply everything via VM/template attributes and qemu_args"
+}

@@ -9,7 +9,15 @@ use crate::config::{self, ConfigErrors, ValidationContext};
 
 /// Real validation context: consults the on-disk template store and the
 /// profile set. Script compile checking is wired to the wisp host module.
-pub struct HostContext;
+pub struct HostContext {
+    profiles: crate::profiles::ProfileSet,
+}
+
+impl HostContext {
+    pub fn new() -> Result<Self> {
+        Ok(Self { profiles: crate::profiles::ProfileSet::load_default()? })
+    }
+}
 
 impl ValidationContext for HostContext {
     fn template_exists(&self, arch: &str, name: &str, version: Option<&str>) -> bool {
@@ -23,16 +31,7 @@ impl ValidationContext for HostContext {
     }
 
     fn profile_exists(&self, name: &str) -> bool {
-        // Interim: shipped profile names; replaced by the profile loader.
-        [
-            "windows-11",
-            "windows-server",
-            "windows-legacy",
-            "linux-modern",
-            "linux-generic",
-            "custom",
-        ]
-        .contains(&name)
+        self.profiles.exists(name)
     }
 
     fn check_script(&self, _path: &Path) -> Result<(), String> {
@@ -46,7 +45,7 @@ pub fn cmd_validate() -> Result<()> {
     let cwd = std::env::current_dir()?;
     let root = crate::paths::find_lab_root(&cwd)?;
     let file = config::load_lab_root(&root).map_err(miette_to_anyhow)?;
-    let issues = config::validate(&file, &HostContext);
+    let issues = config::validate(&file, &HostContext::new()?);
     if issues.is_empty() {
         println!(
             "ok: lab \"{}\" — {} vm(s), {} segment(s)",

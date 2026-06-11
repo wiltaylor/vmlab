@@ -4,7 +4,12 @@
 
 mod cli;
 mod config;
+mod net;
 mod paths;
+mod profiles;
+mod qga;
+mod qmp;
+mod template;
 
 fn main() -> std::process::ExitCode {
     cli::run()

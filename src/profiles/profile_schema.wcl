@@ -1,0 +1,23 @@
+// Schema for guest OS profile files (PRD §5.3). Profiles are data, not
+// code: shipped as WCL and user-extensible from `~/.config/vmlab/profiles/`.
+
+@document
+type ProfileDoc {
+  @children("profile") profiles: list<Profile>
+}
+
+@block("profile")
+type Profile {
+  @inline(0) name: utf8
+  description: utf8?
+  machine: utf8?        // "q35" | "pc" (i440fx)
+  firmware: utf8?       // "ovmf" | "seabios"
+  secure_boot: bool?
+  tpm: bool?            // swtpm 2.0 when true
+  disk_bus: utf8?       // "virtio" | "ide" | "sata"
+  nic_model: utf8?      // "virtio-net-pci" | "e1000" | "rtl8139"
+  display: utf8?        // "qxl" | "virtio-gpu" | "std"
+  cpus: i64?
+  memory: utf8?         // "4G"
+  agent_channel: bool?  // virtio-serial guest agent channel (default true)
+}
