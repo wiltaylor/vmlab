@@ -130,17 +130,25 @@ impl LabRuntime {
         }
         state.save(&lab_local)?;
 
-        // DHCP reservations: static IPs keyed on the persisted MAC (§9.4)
-        // are wired into each segment's gateway by the network layer.
         for vm_cfg in &config.lab.vms {
-            for (i, nic) in vm_cfg.nics.iter().enumerate() {
+            for nic in &vm_cfg.nics {
                 let seg_name = nic_segment_name(nic);
                 if network.segment_mut(seg_name).is_none() {
                     bail!("nic references unknown segment {seg_name}");
                 }
-                let _ = i;
             }
         }
+
+        // Phase 2: gateways with DHCP (reservations from persisted MACs),
+        // DNS (auto-registration + statics + sinkholes) per segment.
+        let host_cfg = crate::config::host::HostConfig::load_default()?;
+        let macs_by_vm: std::collections::HashMap<String, Vec<crate::config::model::MacAddr>> =
+            state
+                .vms
+                .iter()
+                .map(|(n, v)| (n.clone(), v.macs.clone()))
+                .collect();
+        network.wire_gateways(&config.lab, &macs_by_vm, &host_cfg);
 
         Ok(Arc::new(LabRuntime {
             name,

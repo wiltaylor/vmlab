@@ -1,0 +1,17 @@
+// Host-level daemon configuration (`~/.config/vmlab/config.wcl`).
+
+@document
+type HostDoc {
+  @child("host") host: HostConfig?
+}
+
+@block("host")
+type HostConfig {
+  subnet_pool: utf8?        // auto-allocation pool, default 10.213.0.0/16 (§9.4)
+  dns_suffix: utf8?         // default "vmlab.internal" (§9.5)
+  dns_upstream: utf8?       // upstream resolver ip[:port]; default host resolver
+  disk_low_percent: i64?    // host.disk_low threshold, default 10 (§8.1)
+  psk: utf8?                // pre-shared key for cross-host segment links (§9.2)
+  viewer: utf8?             // VNC viewer command; {} replaced by target (§11)
+  oci_chunk_size: utf8?     // OCI layer chunk size, default 512M (§6.4)
+}

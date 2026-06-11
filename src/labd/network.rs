@@ -4,13 +4,16 @@
 
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use ipnet::Ipv4Net;
 
-use crate::config::model::{Lab, Segment};
+use crate::config::model::{Lab, MacAddr, Segment};
+use crate::net::dhcp::DhcpConfig;
+use crate::net::dns::DnsZone;
+use crate::net::gateway::{Gateway, GatewayConfig, gateway_mac};
 use crate::net::switch::{PortClass, Switch};
 
 /// Name of the built-in per-lab NAT segment (`nic { nat = true }`, §9.7).
@@ -29,12 +32,15 @@ pub struct SegmentNet {
     /// NAT egress on (declared `nat = true`, or the built-in segment).
     pub nat: bool,
     pub dhcp: bool,
+    /// Gateway service (ARP/ICMP/DHCP/DNS + uplink seam), wired by
+    /// [`LabNetwork::wire_gateways`].
+    pub gateway: Option<crate::net::gateway::GatewayHandle>,
     listeners: Vec<tokio::task::JoinHandle<()>>,
 }
 
 impl SegmentNet {
     /// Listen on a unix socket for one VM NIC; QEMU connects to it.
-    pub async fn listen_nic(&mut self, sock: &PathBuf, isolated: bool) -> Result<()> {
+    pub async fn listen_nic(&mut self, sock: &Path, isolated: bool) -> Result<()> {
         let handle = self
             .switch
             .listen_unix(sock, PortClass::Guest { isolated })
@@ -85,6 +91,7 @@ impl LabNetwork {
                     config: Some(seg.clone()),
                     nat: seg.nat,
                     dhcp: seg.dhcp,
+                    gateway: None,
                     listeners: Vec::new(),
                 },
             );
@@ -110,6 +117,7 @@ impl LabNetwork {
                     config: None,
                     nat: true,
                     dhcp: true,
+                    gateway: None,
                     listeners: Vec::new(),
                 },
             );
@@ -121,6 +129,181 @@ impl LabNetwork {
     pub fn segment_mut(&mut self, name: &str) -> Option<&mut SegmentNet> {
         self.segments.get_mut(name)
     }
+
+    /// Phase 2: attach a gateway service to every segment (PRD §9.4–§9.6).
+    /// Called after VM MACs are settled so static IPs become DHCP
+    /// reservations keyed on the persisted MAC, and a lease→DNS sync task
+    /// keeps `<vm>.<lab>.<suffix>` registrations current.
+    pub fn wire_gateways(
+        &mut self,
+        lab: &Lab,
+        macs_by_vm: &HashMap<String, Vec<MacAddr>>,
+        host: &crate::config::host::HostConfig,
+    ) {
+        let upstream = host
+            .dns_upstream
+            .as_deref()
+            .and_then(parse_upstream)
+            .or_else(host_resolver);
+
+        for seg in self.segments.values_mut() {
+            let gw_mac = gateway_mac(&lab.name, &seg.name);
+
+            // -- DHCP -------------------------------------------------------
+            let seg_dns = seg
+                .config
+                .as_ref()
+                .map(|c| c.dns.clone())
+                .unwrap_or_default();
+            let dns_enabled = !seg_dns.declared || seg_dns.enabled;
+            let dhcp = if seg.dhcp {
+                let mut cfg = DhcpConfig::new(seg.subnet, seg.gateway_ip, gw_mac);
+                // DNS option (§9.5): segment override > daemon gateway;
+                // suppressed entirely with `dns { enabled = false }`.
+                cfg.dns_server = if !dns_enabled {
+                    None
+                } else {
+                    Some(seg_dns.server.unwrap_or(seg.gateway_ip))
+                };
+                cfg.domain = Some(format!("{}.{}", lab.name, host.dns_suffix));
+                if let Some(c) = &seg.config {
+                    cfg.routes = c.routes.iter().map(|r| (r.dest, r.via)).collect();
+                }
+                // Static IPs → reservations keyed on the persisted MAC (§9.4).
+                for vm in &lab.vms {
+                    for (i, nic) in vm.nics.iter().enumerate() {
+                        if nic_segment_name(nic) == seg.name
+                            && let Some(ip) = nic.ip
+                            && let Some(mac) = macs_by_vm.get(&vm.name).and_then(|m| m.get(i))
+                        {
+                            cfg.reservations.insert(*mac, ip);
+                        }
+                    }
+                }
+                Some(cfg)
+            } else {
+                None
+            };
+
+            // -- DNS zone ---------------------------------------------------
+            let dns = if dns_enabled {
+                let mut zone = DnsZone::new(&host.dns_suffix);
+                // Static-IP guests resolve immediately; dynamic leases are
+                // synced by the task below.
+                for vm in &lab.vms {
+                    for nic in &vm.nics {
+                        if nic_segment_name(nic) == seg.name
+                            && let Some(ip) = nic.ip
+                        {
+                            zone.register(&format!("{}.{}", vm.name, lab.name), ip);
+                            zone.register(&vm.name, ip);
+                        }
+                    }
+                }
+                for rec in lab
+                    .records
+                    .iter()
+                    .chain(seg.config.iter().flat_map(|c| c.records.iter()))
+                {
+                    zone.set_static(&rec.name, rec.ip);
+                }
+                for sink in lab
+                    .sinkholes
+                    .iter()
+                    .chain(seg.config.iter().flat_map(|c| c.sinkholes.iter()))
+                {
+                    zone.add_sinkhole(&sink.pattern, sink.mode);
+                }
+                Some(zone)
+            } else {
+                None
+            };
+
+            let handle = Gateway::spawn(
+                &seg.switch,
+                GatewayConfig {
+                    segment_name: seg.name.clone(),
+                    lab_name: lab.name.clone(),
+                    subnet: seg.subnet,
+                    gw_ip: seg.gateway_ip,
+                    gw_mac,
+                    dhcp,
+                    dns,
+                    upstream_dns: upstream,
+                },
+            );
+
+            // Lease → DNS registration sync (§9.5 auto-registration).
+            if dns_enabled {
+                spawn_lease_dns_sync(&handle, &lab.name, macs_by_vm);
+            }
+
+            seg.gateway = Some(handle);
+        }
+    }
+}
+
+/// Keep `<vm>.<lab>.<suffix>` (and the short `<vm>` alias) registered for
+/// every DHCP lease, matching leases back to VMs via their persisted MACs.
+fn spawn_lease_dns_sync(
+    gateway: &crate::net::gateway::GatewayHandle,
+    lab_name: &str,
+    macs_by_vm: &HashMap<String, Vec<MacAddr>>,
+) {
+    let Some(zone) = gateway.dns_zone() else {
+        return;
+    };
+    let leases_handle = gateway.leases_probe();
+    let mac_to_vm: HashMap<MacAddr, String> = macs_by_vm
+        .iter()
+        .flat_map(|(vm, macs)| macs.iter().map(move |m| (*m, vm.clone())))
+        .collect();
+    let lab = lab_name.to_string();
+    tokio::spawn(async move {
+        let mut known: HashMap<MacAddr, Ipv4Addr> = HashMap::new();
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            let Some(leases) = leases_handle() else { break };
+            for (mac, ip) in leases {
+                if known.get(&mac) == Some(&ip) {
+                    continue;
+                }
+                if let Some(vm) = mac_to_vm.get(&mac)
+                    && let Ok(mut z) = zone.lock()
+                {
+                    z.register(&format!("{vm}.{lab}"), ip);
+                    z.register(vm, ip);
+                    known.insert(mac, ip);
+                }
+            }
+        }
+    });
+}
+
+fn parse_upstream(s: &str) -> Option<std::net::SocketAddr> {
+    if let Ok(sa) = s.parse() {
+        return Some(sa);
+    }
+    s.parse::<std::net::IpAddr>()
+        .ok()
+        .map(|ip| std::net::SocketAddr::new(ip, 53))
+}
+
+/// The host's own resolver, read from /etc/resolv.conf (PRD §9.5: upstream
+/// defaults to the host's resolver).
+fn host_resolver() -> Option<std::net::SocketAddr> {
+    let content = std::fs::read_to_string("/etc/resolv.conf").ok()?;
+    for line in content.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("nameserver")
+            && let Ok(ip) = rest.trim().parse::<std::net::IpAddr>()
+        {
+            // A loopback systemd-resolved stub still works — it's the
+            // host's resolver, reachable from the daemon's host sockets.
+            return Some(std::net::SocketAddr::new(ip, 53));
+        }
+    }
+    None
 }
 
 /// Segment a NIC attaches to: its declared segment, or the built-in NAT

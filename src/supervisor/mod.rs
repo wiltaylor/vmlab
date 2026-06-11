@@ -47,6 +47,24 @@ async fn run_async() -> Result<()> {
     tracing::info!("vmlabd listening on {}", sock.display());
     supervisor.adopt_existing_labs().await;
 
+    // Disk-space watchdog on the template store's filesystem (PRD §8.1).
+    let host_cfg = crate::config::host::HostConfig::load_default().unwrap_or_default();
+    let store_dir = crate::paths::data_dir();
+    crate::paths::ensure_dir(&store_dir)?;
+    let sup_wd = supervisor.clone();
+    crate::config::host::spawn_disk_watchdog(
+        store_dir.clone(),
+        host_cfg.disk_low_percent,
+        std::time::Duration::from_secs(60),
+        move |free| {
+            sup_wd.emit(Event::new(
+                "host.disk_low",
+                "",
+                serde_json::json!({"path": store_dir, "free_percent": free}),
+            ));
+        },
+    );
+
     // Run until killed; the `shutdown` command exits the process directly.
     futures::future::pending::<()>().await;
     drop(server);

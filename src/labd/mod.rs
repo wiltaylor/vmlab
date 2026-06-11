@@ -49,6 +49,23 @@ async fn run_async(lab: String, root: PathBuf) -> Result<()> {
         .await
         .with_context(|| format!("binding {}", sock.display()))?;
 
+    // Disk-space watchdog on the lab-local filesystem — linked clones grow
+    // (PRD §8.1); matters even more on WSL2's growing VHDX (§13).
+    let host_cfg = crate::config::host::HostConfig::load_default().unwrap_or_default();
+    let wd_events = runtime.events.clone();
+    let wd_path = runtime.lab_local.clone();
+    crate::config::host::spawn_disk_watchdog(
+        wd_path.clone(),
+        host_cfg.disk_low_percent,
+        std::time::Duration::from_secs(60),
+        move |free| {
+            wd_events.emit(
+                "host.disk_low",
+                json!({"path": wd_path, "free_percent": free}),
+            );
+        },
+    );
+
     tracing::info!("lab daemon for {lab} listening on {}", sock.display());
     futures::future::pending::<()>().await;
     drop(server);

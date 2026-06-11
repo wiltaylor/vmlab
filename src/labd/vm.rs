@@ -9,7 +9,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
 use tokio::sync::{Mutex, RwLock};
 
-use crate::config::model::{self, MacAddr, TemplateRef};
+use crate::config::model::{self, MacAddr};
 use crate::qemu::{self, Proc, VmPaths};
 use crate::qga::GaClient;
 use crate::qmp::QmpClient;
@@ -107,6 +107,7 @@ pub struct VmInstance {
 }
 
 impl VmInstance {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         lab: &str,
         cfg: model::Vm,

@@ -121,6 +121,16 @@ impl GatewayHandle {
         self.dns.clone()
     }
 
+    /// Detached lease accessor for background tasks (lease→DNS sync): the
+    /// closure returns the current leases, or `None` once DHCP is gone.
+    pub fn leases_probe(&self) -> impl Fn() -> Option<Vec<(MacAddr, Ipv4Addr)>> + Send + 'static {
+        let dhcp = self.dhcp.clone();
+        move || {
+            dhcp.as_ref()
+                .map(|d| d.lock().expect("dhcp lock poisoned").leases())
+        }
+    }
+
     /// Install (or replace) the uplink handler that receives off-segment
     /// frames — the NAT / inter-segment routing seam.
     pub fn set_uplink(&self, handler: UplinkFn) {

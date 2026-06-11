@@ -5,6 +5,7 @@
 #![allow(unused_assignments)]
 
 mod extract;
+pub mod host;
 pub mod model;
 pub mod validate;
 
