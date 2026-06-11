@@ -1,6 +1,7 @@
 //! CLI surface (PRD §12). The same binary also hosts the supervisor and lab
 //! daemons via hidden subcommands, re-exec'd from the CLI as needed.
 
+pub mod daemon;
 mod validate;
 
 use clap::{Parser, Subcommand};
@@ -17,6 +18,11 @@ pub struct Cli {
 pub enum Command {
     /// Validate the lab file with no side effects
     Validate,
+    /// Supervisor control (normally automatic)
+    Daemon {
+        #[command(subcommand)]
+        cmd: daemon::DaemonCmd,
+    },
     /// Internal: run the supervisor daemon in the foreground
     #[command(name = "__supervisord", hide = true)]
     Supervisord,
@@ -36,8 +42,15 @@ pub fn run() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
         Command::Validate => validate::cmd_validate(),
-        Command::Supervisord => todo_daemon("supervisor"),
-        Command::Labd { .. } => todo_daemon("lab daemon"),
+        Command::Daemon { cmd } => daemon::cmd_daemon(cmd),
+        Command::Supervisord => {
+            init_daemon_tracing();
+            crate::supervisor::run()
+        }
+        Command::Labd { lab, root } => {
+            init_daemon_tracing();
+            crate::labd::run(lab, root)
+        }
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -50,6 +63,10 @@ pub fn run() -> ExitCode {
     }
 }
 
-fn todo_daemon(which: &str) -> anyhow::Result<()> {
-    anyhow::bail!("{which} not implemented yet")
+fn init_daemon_tracing() {
+    use tracing_subscriber::EnvFilter;
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        .with_target(false)
+        .init();
 }

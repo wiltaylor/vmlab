@@ -4,11 +4,14 @@
 
 mod cli;
 mod config;
+mod labd;
 mod net;
 mod paths;
 mod profiles;
+mod proto;
 mod qga;
 mod qmp;
+mod supervisor;
 mod template;
 
 fn main() -> std::process::ExitCode {

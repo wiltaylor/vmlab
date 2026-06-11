@@ -1,0 +1,256 @@
+//! The per-user supervisor `vmlabd` (PRD §3): lab lifecycle, lab registry,
+//! global segments, template store writes, host watchdogs, event
+//! aggregation. Auto-started by the CLI; runs in the foreground (the CLI
+//! detaches it into its own process group).
+
+mod registry;
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use anyhow::{Context, Result};
+use serde_json::{Value, json};
+use tokio::sync::Mutex;
+
+use crate::proto::server::{Handler, Server, Streamer};
+use crate::proto::{Event, client::Client};
+use registry::{LabEntry, LabState, Registry};
+
+pub struct Supervisor {
+    registry: Mutex<Registry>,
+    server_events: tokio::sync::OnceCell<tokio::sync::broadcast::Sender<Event>>,
+}
+
+/// Entry point for `vmlab __supervisord`.
+pub fn run() -> Result<()> {
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(run_async())
+}
+
+async fn run_async() -> Result<()> {
+    let runtime_dir = crate::paths::runtime_dir();
+    crate::paths::ensure_dir(&runtime_dir)?;
+    crate::paths::ensure_dir(&crate::paths::state_dir())?;
+
+    let supervisor = Arc::new(Supervisor {
+        registry: Mutex::new(Registry::load()),
+        server_events: tokio::sync::OnceCell::new(),
+    });
+
+    let sock = crate::paths::supervisor_socket();
+    let handler: Arc<dyn Handler> = Arc::new(SupervisorHandler(supervisor.clone()));
+    let server = Server::bind(&sock, handler)
+        .await
+        .with_context(|| format!("binding {}", sock.display()))?;
+    let _ = supervisor.server_events.set(server.events.clone());
+
+    tracing::info!("vmlabd listening on {}", sock.display());
+    supervisor.adopt_existing_labs().await;
+
+    // Run until killed; the `shutdown` command exits the process directly.
+    futures::future::pending::<()>().await;
+    drop(server);
+    Ok(())
+}
+
+impl Supervisor {
+    fn emit(&self, event: Event) {
+        if let Some(tx) = self.server_events.get() {
+            let _ = tx.send(event);
+        }
+    }
+
+    /// Reconnect registry entries from a previous supervisor run: lab
+    /// daemons survive a supervisor restart; dead ones are marked failed.
+    async fn adopt_existing_labs(self: &Arc<Self>) {
+        let entries: Vec<LabEntry> = self.registry.lock().await.labs().to_vec();
+        for entry in entries {
+            if entry.state != LabState::Running {
+                continue;
+            }
+            let sock = crate::paths::lab_socket(&entry.name);
+            match Client::connect(&sock).await {
+                Ok(client) => {
+                    if client.call("ping", Value::Null).await.is_ok() {
+                        self.watch_lab_events(entry.name.clone()).await;
+                        continue;
+                    }
+                    self.mark_crashed(&entry.name).await;
+                }
+                Err(_) => self.mark_crashed(&entry.name).await,
+            }
+        }
+    }
+
+    async fn mark_crashed(&self, lab: &str) {
+        let mut reg = self.registry.lock().await;
+        reg.set_state(lab, LabState::Failed);
+        reg.save();
+        drop(reg);
+        self.emit(Event::new("lab.daemon_crashed", lab, Value::Null));
+        tracing::warn!("lab daemon for {lab} is gone; marked failed");
+    }
+
+    /// Spawn the lab daemon for `name` if it isn't running; wait until its
+    /// control socket answers. Returns the socket path.
+    async fn ensure_lab(self: &Arc<Self>, name: &str, root: PathBuf) -> Result<PathBuf, String> {
+        let sock = crate::paths::lab_socket(name);
+        {
+            let reg = self.registry.lock().await;
+            if let Some(entry) = reg.get(name)
+                && entry.state == LabState::Running
+                && let Ok(c) = Client::connect(&sock).await
+                && c.call("ping", Value::Null).await.is_ok()
+            {
+                return Ok(sock);
+            }
+        }
+
+        crate::paths::ensure_dir(sock.parent().expect("lab socket has parent"))
+            .map_err(|e| e.to_string())?;
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let log_path = crate::paths::state_dir().join(format!("labd-{name}.log"));
+        let log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .map_err(|e| format!("cannot open {}: {e}", log_path.display()))?;
+        let log_err = log.try_clone().map_err(|e| e.to_string())?;
+
+        let child = tokio::process::Command::new(&exe)
+            .arg("__labd")
+            .arg("--lab")
+            .arg(name)
+            .arg("--root")
+            .arg(&root)
+            .stdin(std::process::Stdio::null())
+            .stdout(log)
+            .stderr(log_err)
+            .spawn()
+            .map_err(|e| format!("cannot spawn lab daemon: {e}"))?;
+        let pid = child.id().unwrap_or_default();
+
+        {
+            let mut reg = self.registry.lock().await;
+            reg.upsert(LabEntry {
+                name: name.to_string(),
+                root: root.clone(),
+                pid,
+                state: LabState::Running,
+            });
+            reg.save();
+        }
+
+        // Reap on exit: an exit we didn't ask for is a crash (PRD §3 — no
+        // silent restart; mark failed + event).
+        let sup = self.clone();
+        let lab_name = name.to_string();
+        tokio::spawn(async move {
+            let mut child = child;
+            let status = child.wait().await;
+            let expected = {
+                let reg = sup.registry.lock().await;
+                reg.get(&lab_name).map(|e| e.state == LabState::Stopping).unwrap_or(true)
+            };
+            if expected {
+                let mut reg = sup.registry.lock().await;
+                reg.remove(&lab_name);
+                reg.save();
+            } else {
+                tracing::warn!("lab daemon {lab_name} exited unexpectedly: {status:?}");
+                sup.mark_crashed(&lab_name).await;
+            }
+        });
+
+        // Wait for the control socket to come up.
+        for _ in 0..100 {
+            if let Ok(c) = Client::connect(&sock).await
+                && c.call("ping", Value::Null).await.is_ok()
+            {
+                self.watch_lab_events(name.to_string()).await;
+                return Ok(sock);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        Err(format!("lab daemon for {name} did not come up"))
+    }
+
+    /// Forward a lab daemon's events into the host-wide aggregate stream
+    /// (PRD §8.2).
+    async fn watch_lab_events(self: &Arc<Self>, lab: String) {
+        let sock = crate::paths::lab_socket(&lab);
+        let sup = self.clone();
+        tokio::spawn(async move {
+            let Ok(client) = Client::connect(&sock).await else { return };
+            let Ok(mut rx) = client.subscribe().await else { return };
+            while let Some(ev) = rx.recv().await {
+                sup.emit(ev);
+            }
+        });
+    }
+
+    async fn release_lab(self: &Arc<Self>, name: &str) -> Result<(), String> {
+        let sock = crate::paths::lab_socket(name);
+        {
+            let mut reg = self.registry.lock().await;
+            if reg.get(name).is_none() {
+                return Ok(());
+            }
+            reg.set_state(name, LabState::Stopping);
+            reg.save();
+        }
+        if let Ok(client) = Client::connect(&sock).await {
+            let _ = client.call("shutdown", Value::Null).await;
+        }
+        Ok(())
+    }
+}
+
+/// Wrapper giving command handlers access to `Arc<Supervisor>` (needed for
+/// the tasks they spawn).
+struct SupervisorHandler(Arc<Supervisor>);
+
+#[async_trait::async_trait]
+impl Handler for SupervisorHandler {
+    async fn handle(&self, cmd: &str, args: Value, _stream: &Streamer) -> Result<Value, String> {
+        let sup = &self.0;
+        match cmd {
+            "ping" => Ok(json!("pong")),
+            "version" => Ok(json!(env!("CARGO_PKG_VERSION"))),
+            "status" => {
+                let reg = sup.registry.lock().await;
+                Ok(serde_json::to_value(reg.labs()).map_err(|e| e.to_string())?)
+            }
+            // Spawn (or find) the lab daemon for a lab; returns its socket.
+            "lab.ensure" => {
+                let name = args["name"].as_str().ok_or("missing name")?.to_string();
+                let root = PathBuf::from(args["root"].as_str().ok_or("missing root")?);
+                let sock = sup.ensure_lab(&name, root).await?;
+                Ok(json!({"socket": sock}))
+            }
+            // Stop a lab daemon (after `down`/`destroy`).
+            "lab.release" => {
+                let name = args["name"].as_str().ok_or("missing name")?;
+                sup.release_lab(name).await?;
+                Ok(json!(true))
+            }
+            "shutdown" => {
+                tracing::info!("supervisor shutdown requested");
+                let sup = sup.clone();
+                tokio::spawn(async move {
+                    let names: Vec<String> = {
+                        let reg = sup.registry.lock().await;
+                        reg.labs().iter().map(|l| l.name.clone()).collect()
+                    };
+                    for name in names {
+                        let _ = sup.release_lab(&name).await;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    std::process::exit(0);
+                });
+                Ok(json!(true))
+            }
+            _ => Err(format!("unknown command `{cmd}`")),
+        }
+    }
+}
