@@ -8,7 +8,11 @@
 // crate root's dead_code allow does not cover unused imports).
 #![allow(unused_imports)]
 
+pub mod artefact;
+pub mod build;
+pub mod cli;
 pub mod meta;
+pub mod oci_bridge;
 pub mod qimg;
 pub mod store;
 

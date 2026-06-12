@@ -4,6 +4,7 @@
 pub mod console;
 pub mod daemon;
 mod lab;
+pub mod media;
 pub mod net;
 mod validate;
 
@@ -72,6 +73,16 @@ pub enum Command {
     Net {
         #[command(subcommand)]
         cmd: net::NetCmd,
+    },
+    /// Manage the template store and OCI distribution (PRD §6)
+    Template {
+        #[command(subcommand)]
+        cmd: crate::template::cli::TemplateCmd,
+    },
+    /// Build an ISO or floppy image from a folder (PRD §6.3)
+    Media {
+        #[command(subcommand)]
+        cmd: media::MediaCmd,
     },
     /// Attach a console viewer to a VM (PRD §11)
     Console {
@@ -145,6 +156,8 @@ pub fn run() -> ExitCode {
         Command::Snapshots { vm } => lab::cmd_snapshots(&vm),
         Command::SnapshotDelete { vm, name } => lab::cmd_snapshot_delete(&vm, name),
         Command::Net { cmd } => net::cmd_net(cmd),
+        Command::Template { cmd } => crate::template::cli::cmd_template(cmd),
+        Command::Media { cmd } => media::cmd_media(cmd),
         Command::Console { vm, tcp } => console::cmd_console(&vm, tcp),
         Command::Run { script } => lab::cmd_run(&script),
         Command::Wispi { out } => crate::scripting::write_interface(&out)

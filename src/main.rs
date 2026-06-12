@@ -14,6 +14,7 @@ mod qemu;
 mod qga;
 mod qmp;
 mod scripting;
+mod smb;
 mod supervisor;
 mod template;
 mod vision;
