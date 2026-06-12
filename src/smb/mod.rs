@@ -66,8 +66,8 @@ pub struct MountStep {
 struct VmPlan {
     creds: SmbCredentials,
     gateway: Ipv4Addr,
-    /// (share name, guest target, readonly, smb1)
-    shares: Vec<(String, String, bool, bool)>,
+    /// (share name, host path, guest target, readonly, smb1)
+    shares: Vec<(String, PathBuf, String, bool, bool)>,
 }
 
 /// High-level SMB orchestration for one lab.
@@ -100,7 +100,15 @@ impl LabSmb {
             let creds = SmbCredentials::generate(lab, vm_name);
             let share_tuples = shares
                 .iter()
-                .map(|s| (s.name.clone(), s.guest.clone(), s.readonly, s.smb1))
+                .map(|s| {
+                    (
+                        s.name.clone(),
+                        s.host.clone(),
+                        s.guest.clone(),
+                        s.readonly,
+                        s.smb1,
+                    )
+                })
                 .collect();
             plans.insert(
                 vm_name.clone(),
@@ -140,13 +148,13 @@ impl LabSmb {
         vm_names.sort();
         for vm in vm_names {
             let plan = &self.vms[vm];
-            for (name, _guest, readonly, smb1) in &plan.shares {
+            for (name, host, _guest, readonly, smb1) in &plan.shares {
                 if *smb1 {
                     any_smb1 = true;
                 }
                 shares.push(ShareDef {
                     name: name.clone(),
-                    host_path: PathBuf::new(), // filled by caller-provided host paths below
+                    host_path: host.clone(),
                     readonly: *readonly,
                     smb1: *smb1,
                     allowed_user: plan.creds.username.clone(),
@@ -202,7 +210,7 @@ impl LabSmb {
         let creds = &plan.creds;
         let gw = plan.gateway;
         let mut steps = Vec::new();
-        for (share, guest, readonly, smb1) in &plan.shares {
+        for (share, _host, guest, readonly, smb1) in &plan.shares {
             match os_hint {
                 OsHint::Linux => {
                     let (cmd, args) = linux_mount_cmd(

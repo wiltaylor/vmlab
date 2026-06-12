@@ -28,6 +28,9 @@ pub struct LabRuntime {
     pub network: Mutex<LabNetwork>,
     pub state: Mutex<LabState>,
     pub events: Arc<EventLog>,
+    /// SMB server for the lab's shares (PRD §7.5); `None` until `up` starts
+    /// it (only when some VM declares shares).
+    pub smb: Mutex<Option<crate::smb::LabSmb>>,
 }
 
 impl LabRuntime {
@@ -186,7 +189,122 @@ impl LabRuntime {
             network: Mutex::new(network),
             state: Mutex::new(state),
             events,
+            smb: Mutex::new(None),
         }))
+    }
+
+    /// Start the SMB server for the lab's shares and DNAT each relevant
+    /// segment gateway's port 445 to it (PRD §7.5). Best-effort: a failure
+    /// is logged and the rest of the lab still works. Called from `up`.
+    async fn ensure_smb(self: &Arc<Self>) {
+        // Collect sharing VMs with their gateway IP (first NIC's segment).
+        let mut sharing: Vec<(String, std::net::Ipv4Addr, Vec<crate::config::model::Share>)> =
+            Vec::new();
+        let mut seg_ports: Vec<String> = Vec::new();
+        {
+            let net = self.network.lock().await;
+            for vm in &self.config.lab.vms {
+                if vm.shares.is_empty() {
+                    continue;
+                }
+                let Some(nic) = vm.nics.first() else { continue };
+                let seg_name = nic_segment_name(nic);
+                let Some(seg) = net.segments.get(seg_name) else {
+                    continue;
+                };
+                sharing.push((vm.name.clone(), seg.gateway_ip, vm.shares.clone()));
+                if !seg_ports.contains(&seg_name.to_string()) {
+                    seg_ports.push(seg_name.to_string());
+                }
+            }
+        }
+        if sharing.is_empty() {
+            return;
+        }
+
+        // Pick a stable-ish high port for smbd.
+        let port = 14450;
+        let mut labsmb = crate::smb::LabSmb::plan(&self.name, &self.lab_local, port, &sharing);
+        let config = labsmb.build_config();
+        match labsmb.spawn(config) {
+            Ok(p) => {
+                tracing::info!("SMB server for lab {} on 127.0.0.1:{p}", self.name);
+                self.events.emit("smb.started", json!({"port": p}));
+            }
+            Err(e) => {
+                tracing::warn!("SMB server failed to start: {e}");
+                self.events
+                    .emit("smb.failed", json!({"error": e.to_string()}));
+                return;
+            }
+        }
+
+        // DNAT gateway:445 → 127.0.0.1:smbd on each sharing segment, so a
+        // guest mounting \\<gateway>\<share> reaches the local smbd via NAT.
+        {
+            let net = self.network.lock().await;
+            for seg_name in &seg_ports {
+                if let Some(seg) = net.segments.get(seg_name)
+                    && let Some(services) = &seg.services
+                    && let Ok(mut rs) = services.rules.lock()
+                {
+                    use crate::config::model::{HostPort, RedirectRule};
+                    rs.add_redirect(RedirectRule {
+                        from: HostPort {
+                            ip: seg.gateway_ip,
+                            port: Some(445),
+                        },
+                        to: HostPort {
+                            ip: std::net::Ipv4Addr::LOCALHOST,
+                            port: Some(labsmb.listen_port()),
+                        },
+                        proto: None,
+                        span: (0, 0),
+                    });
+                }
+            }
+        }
+
+        *self.smb.lock().await = Some(labsmb);
+    }
+
+    /// Mount a VM's SMB shares through the guest agent (PRD §7.5). Linux
+    /// guests use cifs; Windows guests use net use / mklink. XP-era guests
+    /// without an agent are mounted by provision scripts via screen
+    /// automation instead (documented; not attempted here).
+    async fn mount_shares(self: &Arc<Self>, vm_name: &str) {
+        let cfg = self.config.lab.vms.iter().find(|v| v.name == vm_name);
+        let Some(cfg) = cfg else { return };
+        if cfg.shares.is_empty() {
+            return;
+        }
+        let smb = self.smb.lock().await;
+        let Some(labsmb) = smb.as_ref() else { return };
+
+        // Detect the guest OS family from the profile / agent.
+        let os_hint = guest_os_hint(cfg);
+        let steps = labsmb.mount_plan(vm_name, os_hint);
+        let Ok(vm) = self.vm(vm_name) else { return };
+        let Ok(qga) = vm.qga().await else {
+            tracing::warn!("{vm_name}: no agent, cannot auto-mount shares");
+            return;
+        };
+        for step in steps {
+            let args: Vec<&str> = step.args.iter().map(String::as_str).collect();
+            match qga
+                .exec(&step.command, &args, true, Duration::from_secs(30))
+                .await
+            {
+                Ok(r) if r.exit_code == 0 => {}
+                Ok(r) => tracing::warn!(
+                    "{vm_name}: mount step `{}` exited {}: {}",
+                    step.command,
+                    r.exit_code,
+                    String::from_utf8_lossy(&r.stderr)
+                ),
+                Err(e) => tracing::warn!("{vm_name}: mount step failed: {e}"),
+            }
+        }
     }
 
     pub fn vm(&self, name: &str) -> Result<&Arc<VmInstance>> {
@@ -273,6 +391,10 @@ impl LabRuntime {
                 .collect()
         };
 
+        // Start the SMB server before guests boot so shares are reachable
+        // during provisioning (PRD §7.5).
+        self.ensure_smb().await;
+
         let mut remaining: Vec<String> = targets.clone();
         let mut done: HashSet<String> = HashSet::new();
         let mut next_provision = 0usize;
@@ -327,6 +449,15 @@ impl LabRuntime {
             .await?;
 
         self.install_declared_forwards().await;
+
+        // Mount SMB shares on ready, agent-having VMs (PRD §7.5).
+        for name in &targets {
+            if let Ok(vm) = self.vm(name)
+                && vm.is_ready().await
+            {
+                self.mount_shares(name).await;
+            }
+        }
 
         self.events.emit("lab.up", json!({"vms": targets}));
         Ok(())
@@ -660,5 +791,16 @@ impl LabRuntime {
                 .map(|(name, r)| json!({"name": name, "online": r.online, "taken_at": r.taken_at}))
                 .collect::<Vec<_>>()
         ))
+    }
+}
+
+/// Guess the guest OS family for SMB mount-command selection (PRD §7.5).
+/// Heuristic from the resolved profile name; Windows profiles → Windows,
+/// the legacy profile → XP-era, everything else → Linux.
+fn guest_os_hint(vm: &crate::config::model::Vm) -> crate::smb::OsHint {
+    match vm.profile.as_deref() {
+        Some("windows-legacy") => crate::smb::OsHint::WindowsXp,
+        Some(p) if p.starts_with("windows") => crate::smb::OsHint::Windows,
+        _ => crate::smb::OsHint::Linux,
     }
 }
