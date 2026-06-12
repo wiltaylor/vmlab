@@ -32,6 +32,11 @@ pub struct SegmentNet {
     /// NAT egress on (declared `nat = true`, or the built-in segment).
     pub nat: bool,
     pub dhcp: bool,
+    /// Supervisor-owned shared segment (PRD §9.2): no local gateway; bridged
+    /// to the supervisor's global switch via a trunk.
+    pub global: bool,
+    /// Cross-host peer (`connect { host }`), forwarded to the supervisor.
+    pub peer: Option<String>,
     /// Gateway service (ARP/ICMP/DHCP/DNS + uplink seam), wired by
     /// [`LabNetwork::wire_gateways`].
     pub gateway: Option<crate::net::gateway::GatewayHandle>,
@@ -93,6 +98,8 @@ impl LabNetwork {
                     config: Some(seg.clone()),
                     nat: seg.nat,
                     dhcp: seg.dhcp,
+                    global: seg.global,
+                    peer: seg.connect.as_ref().map(|c| c.host.clone()),
                     gateway: None,
                     services: None,
                     listeners: Vec::new(),
@@ -120,6 +127,8 @@ impl LabNetwork {
                     config: None,
                     nat: true,
                     dhcp: true,
+                    global: false,
+                    peer: None,
                     gateway: None,
                     services: None,
                     listeners: Vec::new(),
@@ -132,6 +141,69 @@ impl LabNetwork {
 
     pub fn segment_mut(&mut self, name: &str) -> Option<&mut SegmentNet> {
         self.segments.get_mut(name)
+    }
+
+    /// Bridge each global segment to the supervisor's global switch (PRD
+    /// §9.2): ask the supervisor to attach (creating the shared segment on
+    /// first use), then connect this segment's local switch to the returned
+    /// trunk socket. The supervisor runs the shared DHCP/DNS.
+    pub async fn attach_globals(&mut self) -> anyhow::Result<()> {
+        let supervisor_sock = crate::paths::supervisor_socket();
+        for seg in self.segments.values_mut() {
+            if !seg.global {
+                continue;
+            }
+            let client = crate::proto::client::Client::connect(&supervisor_sock)
+                .await
+                .context("connecting to supervisor for global segment")?;
+            let mut args = serde_json::json!({"name": seg.name});
+            if let Some(subnet) = seg.config.as_ref().and_then(|c| c.subnet) {
+                args["subnet"] = serde_json::json!(subnet.to_string());
+            }
+            if let Some(peer) = &seg.peer {
+                args["peer"] = serde_json::json!(peer);
+            }
+            let resp = client
+                .call("global.attach", args)
+                .await
+                .map_err(|e| anyhow::anyhow!("global.attach: {e}"))?;
+            let trunk_sock = std::path::PathBuf::from(
+                resp["socket"]
+                    .as_str()
+                    .context("malformed global.attach response")?,
+            );
+            let stream = tokio::net::UnixStream::connect(&trunk_sock)
+                .await
+                .with_context(|| format!("connecting global trunk {}", trunk_sock.display()))?;
+            let _port = seg
+                .switch
+                .add_stream_port(stream, crate::net::switch::PortClass::Service)
+                .await;
+            tracing::info!("bridged global segment \"{}\" to supervisor", seg.name);
+        }
+        Ok(())
+    }
+
+    /// Detach this lab's global segments from the supervisor (on shutdown).
+    pub async fn detach_globals(&self) {
+        let names: Vec<String> = self
+            .segments
+            .values()
+            .filter(|s| s.global)
+            .map(|s| s.name.clone())
+            .collect();
+        if names.is_empty() {
+            return;
+        }
+        if let Ok(client) =
+            crate::proto::client::Client::connect(&crate::paths::supervisor_socket()).await
+        {
+            for name in names {
+                let _ = client
+                    .call("global.detach", serde_json::json!({"name": name}))
+                    .await;
+            }
+        }
     }
 
     /// Phase 2: attach a gateway service to every segment (PRD §9.4–§9.6).
@@ -151,6 +223,11 @@ impl LabNetwork {
             .or_else(host_resolver);
 
         for seg in self.segments.values_mut() {
+            if seg.global {
+                // Global segments are gatewayed by the supervisor; the lab
+                // daemon only bridges its local switch over a trunk.
+                continue;
+            }
             let gw_mac = gateway_mac(&lab.name, &seg.name);
 
             // -- DHCP -------------------------------------------------------

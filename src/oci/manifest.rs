@@ -81,7 +81,11 @@ pub struct Manifest {
     pub schema_version: u32,
     #[serde(rename = "mediaType")]
     pub media_type: String,
-    #[serde(rename = "artifactType", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "artifactType",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub artifact_type: Option<String>,
     pub config: Descriptor,
     pub layers: Vec<Descriptor>,
@@ -276,15 +280,15 @@ pub fn parse_manifest_or_index(bytes: &[u8]) -> Result<ManifestOrIndex> {
         .get("mediaType")
         .and_then(|v| v.as_str())
         .unwrap_or_default();
-    let is_index = media == media_types::OCI_INDEX
-        || (media.is_empty() && value.get("manifests").is_some());
+    let is_index =
+        media == media_types::OCI_INDEX || (media.is_empty() && value.get("manifests").is_some());
     if is_index {
-        let index: ImageIndex = serde_json::from_value(value)
-            .map_err(|e| anyhow!("malformed image index: {e}"))?;
+        let index: ImageIndex =
+            serde_json::from_value(value).map_err(|e| anyhow!("malformed image index: {e}"))?;
         Ok(ManifestOrIndex::Index(index))
     } else if value.get("layers").is_some() || media == media_types::OCI_MANIFEST {
-        let manifest: Manifest = serde_json::from_value(value)
-            .map_err(|e| anyhow!("malformed image manifest: {e}"))?;
+        let manifest: Manifest =
+            serde_json::from_value(value).map_err(|e| anyhow!("malformed image manifest: {e}"))?;
         Ok(ManifestOrIndex::Manifest(manifest))
     } else {
         bail!("document is neither an OCI image manifest nor an image index");

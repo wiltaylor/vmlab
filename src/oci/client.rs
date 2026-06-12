@@ -25,7 +25,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use super::auth::{self, BearerChallenge, Credential};
-use super::chunking::{self, ChunkSet};
+use super::chunking;
 use super::config_blob::TemplateConfig;
 use super::manifest::{
     Descriptor, ImageIndex, Manifest, ManifestOrIndex, build_manifest, parse_manifest_or_index,
@@ -118,8 +118,12 @@ impl Registry {
         work_dir: &Path,
     ) -> Result<()> {
         let repo = self.reference.repository.clone();
-        let meta = TemplateMeta::read_from(&template_dir.join(META_FILE))
-            .with_context(|| format!("cannot read template metadata in {}", template_dir.display()))?;
+        let meta = TemplateMeta::read_from(&template_dir.join(META_FILE)).with_context(|| {
+            format!(
+                "cannot read template metadata in {}",
+                template_dir.display()
+            )
+        })?;
         let disk = template_dir.join(DISK_FILE);
 
         // 1. Chunk + compress.
@@ -128,7 +132,11 @@ impl Registry {
 
         // 2. Upload chunk blobs (skip if present).
         for c in &set.chunks {
-            if self.transport.blob_exists(&repo, &c.compressed_digest).await? {
+            if self
+                .transport
+                .blob_exists(&repo, &c.compressed_digest)
+                .await?
+            {
                 tracing::debug!(digest = %c.compressed_digest, "chunk already present, skipping");
                 continue;
             }
@@ -172,7 +180,11 @@ impl Registry {
 
         // 5. Merge into the tag's index (creating it if absent / promoting
         // a plain manifest tag into an index).
-        let mut index = match self.transport.get_manifest(&repo, &self.reference.tag).await? {
+        let mut index = match self
+            .transport
+            .get_manifest(&repo, &self.reference.tag)
+            .await?
+        {
             Some(f) => match parse_manifest_or_index(&f.body)? {
                 ManifestOrIndex::Index(i) => i,
                 ManifestOrIndex::Manifest(_) => ImageIndex::new(),
@@ -416,19 +428,18 @@ impl HttpTransport {
                 Err(e) => return Err(e).context("HTTP request failed"),
             };
 
-            if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-                if let Some(challenge) = resp
+            if resp.status() == reqwest::StatusCode::UNAUTHORIZED
+                && let Some(challenge) = resp
                     .headers()
                     .get(reqwest::header::WWW_AUTHENTICATE)
                     .and_then(|v| v.to_str().ok())
                     .and_then(auth::parse_bearer_challenge)
-                {
-                    let token = self.fetch_token(&challenge).await?;
-                    self.tokens.lock().await.insert(scope.to_string(), token);
-                    // Retry once now that we have a token.
-                    if attempt < MAX_RETRIES {
-                        continue;
-                    }
+            {
+                let token = self.fetch_token(&challenge).await?;
+                self.tokens.lock().await.insert(scope.to_string(), token);
+                // Retry now that we have a token.
+                if attempt < MAX_RETRIES {
+                    continue;
                 }
             }
 
@@ -491,7 +502,9 @@ impl Transport for HttpTransport {
     async fn get_blob(&self, repository: &str, digest: &str) -> Result<Vec<u8>> {
         let url = self.url(&format!("/v2/{repository}/blobs/{digest}"));
         let scope = self.scope(repository, false);
-        let resp = self.send_with_auth(&scope, || self.client.get(&url)).await?;
+        let resp = self
+            .send_with_auth(&scope, || self.client.get(&url))
+            .await?;
         if !resp.status().is_success() {
             bail!("GET blob {digest} returned {}", resp.status());
         }
@@ -546,7 +559,11 @@ impl Transport for HttpTransport {
             .and_then(|v| v.to_str().ok())
             .unwrap_or(media_types::OCI_MANIFEST)
             .to_string();
-        let body = resp.bytes().await.context("reading manifest body")?.to_vec();
+        let body = resp
+            .bytes()
+            .await
+            .context("reading manifest body")?
+            .to_vec();
         Ok(Some(Fetched { media_type, body }))
     }
 
@@ -777,10 +794,7 @@ mod tests {
 
         assert_eq!(pulled.arch, "x86_64");
         assert_eq!(pulled.name, "alpine");
-        assert_eq!(
-            pulled.origin.as_deref(),
-            Some("ghcr.io/owner/alpine:3.20")
-        );
+        assert_eq!(pulled.origin.as_deref(), Some("ghcr.io/owner/alpine:3.20"));
         // disk reassembled identically
         let resolved = store.resolve("x86_64", "alpine", Some("3.20")).unwrap();
         assert_eq!(std::fs::read(&resolved.disk_path).unwrap(), disk);
@@ -818,7 +832,10 @@ mod tests {
             .await;
         assert!(no_arch.is_err());
         assert!(
-            no_arch.unwrap_err().to_string().contains("--arch is required"),
+            no_arch
+                .unwrap_err()
+                .to_string()
+                .contains("--arch is required"),
             "multi-arch pull without --arch must demand it"
         );
 
@@ -891,7 +908,10 @@ mod tests {
         // fail on the per-chunk digest check.
         let fake = std::sync::Arc::new(FakeRegistry::default());
         let work = tempfile::tempdir().unwrap();
-        let disk = vec![9u8; 2 * 1024 * 1024];
+        // incompressible disk so a chunk blob is unambiguously the largest.
+        let disk: Vec<u8> = (0..(2u32 * 1024 * 1024))
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
+            .collect();
         let tdir = work.path().join("t");
         make_template(&tdir, &meta("x86_64"), &disk);
         registry_with_fake("ghcr.io/owner/alpine:3.20", fake.clone())
@@ -899,25 +919,14 @@ mod tests {
             .await
             .unwrap();
 
-        // tamper with one chunk blob's stored bytes (keep its key)
+        // tamper with the largest blob — a chunk, not the small config blob.
         {
             let mut blobs = fake.blobs.lock().unwrap();
-            let chunk_key = blobs
-                .keys()
-                .find(|k| {
-                    // chunk blobs were stored by their compressed digest;
-                    // the config blob is small — pick the largest value
-                    true && k.contains("@sha256:")
-                })
-                .cloned()
-                .unwrap();
-            // find the actual largest blob to corrupt (a chunk, not config)
             let target = blobs
                 .iter()
                 .max_by_key(|(_, v)| v.len())
                 .map(|(k, _)| k.clone())
                 .unwrap();
-            let _ = chunk_key;
             blobs.get_mut(&target).unwrap().push(0xFF);
         }
 
@@ -935,8 +944,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let img = dir.path().join("d");
         std::fs::write(&img, b"abc").unwrap();
-        let set =
-            chunking::chunk_and_compress(&img, 1024 * 1024, &dir.path().join("c")).unwrap();
+        let set = chunking::chunk_and_compress(&img, 1024 * 1024, &dir.path().join("c")).unwrap();
         assert_eq!(set.chunk_count, 1);
     }
 }

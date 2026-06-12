@@ -29,8 +29,13 @@ use super::config::{SmbConfig, check_nt1_supported};
 pub enum SmbError {
     #[error("smbd binary not found on PATH (install Samba)")]
     SmbdMissing,
-    #[error("smbpasswd binary not found on PATH (install Samba)")]
-    SmbpasswdMissing,
+    #[error("pdbedit binary not found on PATH (install Samba)")]
+    PdbeditMissing,
+    #[error(
+        "passdb account `{user}` is not a real Unix user — the unprivileged \
+         tdbsam backend requires the SMB username to map to /etc/passwd"
+    )]
+    NotUnixUser { user: String },
     #[error(
         "a share requested smb1 (NT1) but this smbd build lacks SMB1 server support \
          (WITH_SMB1SERVER); the distro has trimmed it"
@@ -100,9 +105,13 @@ impl SmbServer {
         }
 
         // 4. Spawn smbd foregrounded.
-        //    -F        : run in the foreground (we own the child)
-        //    -S        : log to stderr/stdout (we also point `log file` at our log)
+        //    -F                 : run in the foreground (we own the child)
         //    --no-process-group : don't make a new pgrp, so our kill reaches it
+        //    -s <conf>          : our lab-local config (this smbd build only
+        //                         accepts the `-s` form, not `--configfile X`)
+        //    -l <lab_dir>       : log basename under the lab dir, so smbd's
+        //                         default `log.smbd` does not try to write the
+        //                         root-owned /var/log/samba (would just warn).
         let log = config.log_path();
         let log_file = std::fs::OpenOptions::new()
             .create(true)
@@ -119,10 +128,11 @@ impl SmbServer {
 
         let mut child = Command::new("smbd")
             .arg("-F")
-            .arg("-S")
             .arg("--no-process-group")
-            .arg("--configfile")
+            .arg("-s")
             .arg(&conf_path)
+            .arg("-l")
+            .arg(&config.lab_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::from(log_file))
             .stderr(Stdio::from(log_file2))
@@ -192,23 +202,37 @@ impl Drop for SmbServer {
     }
 }
 
-/// Create a passdb account with `smbpasswd`, piping the password twice on
-/// stdin. Runs against our lab-local config so the account lands in the
-/// relocated tdbsam — no root, no system passdb touched.
+/// Create a passdb account with `pdbedit`, piping the password twice on stdin.
+///
+/// We use `pdbedit -s <conf> -a -u <user> -t` rather than `smbpasswd -a`
+/// because, on a stock build, `smbpasswd -a`/`-L` is root-only; `pdbedit`
+/// against our lab-local `-s <conf>` lands the account in the relocated tdbsam
+/// with no root and without touching the system passdb. `-t` reads the new
+/// password and its confirmation from stdin.
+///
+/// The account name **must** be a real Unix user (the tdbsam backend maps SMB
+/// accounts to `/etc/passwd`); we pre-check that and surface a clear error.
 fn create_user(conf_path: &PathBuf, user: &str, pass: &str) -> Result<()> {
-    let mut child = Command::new("smbpasswd")
-        .arg("-c")
+    if !unix_user_exists(user) {
+        return Err(SmbError::NotUnixUser {
+            user: user.to_string(),
+        });
+    }
+
+    let mut child = Command::new("pdbedit")
+        .arg("-s")
         .arg(conf_path)
-        .arg("-a") // add user
-        .arg("-s") // silent: read password from stdin (twice)
+        .arg("-a") // add account
+        .arg("-u")
         .arg(user)
+        .arg("-t") // read password (and confirmation) from stdin
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                SmbError::SmbpasswdMissing
+                SmbError::PdbeditMissing
             } else {
                 SmbError::CreateUser {
                     user: user.to_string(),
@@ -222,7 +246,7 @@ fn create_user(conf_path: &PathBuf, user: &str, pass: &str) -> Result<()> {
             user: user.to_string(),
             detail: "no stdin handle".to_string(),
         })?;
-        // smbpasswd -s reads the new password and its confirmation.
+        // pdbedit -t reads the new password and its confirmation.
         let payload = format!("{pass}\n{pass}\n");
         stdin
             .write_all(payload.as_bytes())
@@ -244,6 +268,19 @@ fn create_user(conf_path: &PathBuf, user: &str, pass: &str) -> Result<()> {
         });
     }
     Ok(())
+}
+
+/// Whether `user` exists in the system passwd database (`getent passwd`,
+/// falling back to `id`).
+fn unix_user_exists(user: &str) -> bool {
+    if let Ok(out) = Command::new("getent").arg("passwd").arg(user).output() {
+        return out.status.success();
+    }
+    Command::new("id")
+        .arg(user)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -273,7 +310,8 @@ mod tests {
         std::fs::create_dir_all(&share_dir).unwrap();
         std::fs::write(share_dir.join("hello.txt"), b"hi").unwrap();
 
-        let user = "vmlab-test";
+        // The unprivileged passdb requires a real Unix account; use ours.
+        let user = super::super::config::current_unix_user();
         let pass = "TestPass123abc";
         let port = free_high_port();
 

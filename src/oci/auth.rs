@@ -266,13 +266,26 @@ fn split_params(s: &str) -> Vec<String> {
 /// half of `vmlab template login`; the caller validates the credential
 /// against the registry first.
 pub fn store_login(registry: &str, username: &str, password: &str) -> Result<PathBuf> {
-    let path = docker_config_path().ok_or_else(|| anyhow!("cannot determine docker config path"))?;
+    let path =
+        docker_config_path().ok_or_else(|| anyhow!("cannot determine docker config path"))?;
+    store_login_at(&path, registry, username, password)?;
+    Ok(path)
+}
+
+/// Persist a credential into a specific config file (the testable core of
+/// [`store_login`]).
+pub fn store_login_at(
+    path: &std::path::Path,
+    registry: &str,
+    username: &str,
+    password: &str,
+) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("cannot create {}", parent.display()))?;
     }
     let mut root: serde_json::Value = if path.is_file() {
-        let text = std::fs::read_to_string(&path)
+        let text = std::fs::read_to_string(path)
             .with_context(|| format!("cannot read {}", path.display()))?;
         serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({}))
     } else {
@@ -284,8 +297,8 @@ pub fn store_login(registry: &str, username: &str, password: &str) -> Result<Pat
     let auth = BASE64.encode(format!("{username}:{password}"));
     root["auths"][registry] = serde_json::json!({ "auth": auth });
     let text = serde_json::to_string_pretty(&root).context("cannot serialise docker config")?;
-    std::fs::write(&path, text).with_context(|| format!("cannot write {}", path.display()))?;
-    Ok(path)
+    std::fs::write(path, text).with_context(|| format!("cannot write {}", path.display()))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -361,10 +374,7 @@ mod tests {
         let c = parse_bearer_challenge(h).unwrap();
         assert_eq!(c.realm, "https://ghcr.io/token");
         assert_eq!(c.service.as_deref(), Some("ghcr.io"));
-        assert_eq!(
-            c.scope.as_deref(),
-            Some("repository:owner/name:pull")
-        );
+        assert_eq!(c.scope.as_deref(), Some("repository:owner/name:pull"));
     }
 
     #[test]
@@ -376,13 +386,8 @@ mod tests {
     #[test]
     fn store_login_round_trips() {
         let dir = tempfile::tempdir().unwrap();
-        // point DOCKER_CONFIG at the temp dir for this test
-        let prev = std::env::var_os("DOCKER_CONFIG");
-        // SAFETY: single-threaded test mutation of an env var we restore.
-        unsafe {
-            std::env::set_var("DOCKER_CONFIG", dir.path());
-        }
-        let path = store_login("ghcr.io", "carol", "tok").unwrap();
+        let path = dir.path().join("config.json");
+        store_login_at(&path, "ghcr.io", "carol", "tok").unwrap();
         assert!(path.is_file());
         let cred = resolve_from_file("ghcr.io", &path).unwrap();
         assert_eq!(
@@ -392,12 +397,15 @@ mod tests {
                 password: "tok".into()
             }
         );
-        // restore env
-        unsafe {
-            match prev {
-                Some(v) => std::env::set_var("DOCKER_CONFIG", v),
-                None => std::env::remove_var("DOCKER_CONFIG"),
-            }
-        }
+        // merging a second registry preserves the first
+        store_login_at(&path, "reg.example.com", "dave", "pw").unwrap();
+        assert!(matches!(
+            resolve_from_file("ghcr.io", &path).unwrap(),
+            Credential::Basic { .. }
+        ));
+        assert!(matches!(
+            resolve_from_file("reg.example.com", &path).unwrap(),
+            Credential::Basic { .. }
+        ));
     }
 }

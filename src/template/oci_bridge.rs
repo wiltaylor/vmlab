@@ -1,31 +1,32 @@
-//! Thin bridge to the OCI distribution module (PRD §6.4). Kept as a seam so
-//! the template CLI compiles independently of the OCI module's exact API;
-//! reconciled to the real `crate::oci` calls once that module lands.
+//! Bridge from the template CLI to the OCI distribution module (PRD §6.4).
 
 use std::path::Path;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 
 use super::meta::TemplateMeta;
 use super::store::TemplateStore;
 
-pub async fn push(
-    _template_dir: &Path,
-    _target: &str,
-    _chunk_size: u64,
-    _arch: &str,
-) -> Result<()> {
-    bail!("OCI push is not yet wired into this build")
+pub async fn push(template_dir: &Path, target: &str, chunk_size: u64, arch: &str) -> Result<()> {
+    let registry = crate::oci::Registry::new(target)?;
+    // Work area on the same filesystem as the store is unnecessary for push
+    // (chunks stage anywhere); use a tempdir under the data dir.
+    let work = crate::paths::data_dir().join("cache").join("oci-push");
+    std::fs::create_dir_all(&work)?;
+    registry.push(template_dir, chunk_size, arch, &work).await
 }
 
-pub async fn pull(
-    _target: &str,
-    _arch: Option<&str>,
-    _store: &TemplateStore,
-) -> Result<TemplateMeta> {
-    bail!("OCI pull is not yet wired into this build")
+pub async fn pull(target: &str, arch: Option<&str>, store: &TemplateStore) -> Result<TemplateMeta> {
+    let registry = crate::oci::Registry::new(target)?;
+    // Pull staging must share the store's filesystem for the atomic install
+    // rename (the OCI module documents this).
+    let work = crate::paths::template_store_dir().join(".oci-pull");
+    std::fs::create_dir_all(&work)?;
+    let meta = registry.pull(arch, store, &work, false).await;
+    let _ = std::fs::remove_dir_all(&work);
+    meta
 }
 
-pub async fn login(_registry: &str, _user: &str, _pass: &str) -> Result<()> {
-    bail!("OCI login is not yet wired into this build")
+pub async fn login(registry: &str, user: &str, pass: &str) -> Result<()> {
+    crate::oci::login(registry, user, pass).await.map(|_| ())
 }

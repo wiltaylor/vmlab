@@ -32,20 +32,32 @@ pub struct SmbCredentials {
 }
 
 impl SmbCredentials {
-    /// Generate a credential for a VM within a lab. The username is derived
-    /// from the VM name (`vmlab-<vm>`, sanitised to a valid Samba/Unix-ish
-    /// account string); the password is a strong random token.
+    /// Generate the credential for a lab.
     ///
-    /// The `lab` argument scopes/namespaces the credential to the lab so two
-    /// labs reusing the same VM name do not collide conceptually; it is folded
-    /// into the username only when it would otherwise be ambiguous. We keep the
-    /// username readable (`vmlab-<vm>`) because the share's `valid users`
-    /// references it.
+    /// ## Unprivileged-passdb constraint (important)
+    ///
+    /// Samba's `tdbsam` passdb requires every SMB account to map to a *real
+    /// Unix account* (`pdbedit`/`smbpasswd` reject names with no `/etc/passwd`
+    /// entry). Creating arbitrary per-VM Unix accounts (`vmlab-<vm>`) needs
+    /// root, which this backend deliberately avoids (PRD §7.5 strategy 2 runs
+    /// `smbd` unprivileged). So the SMB **username is the invoking Unix user**
+    /// (the same identity `force user` exports the host tree as) and there is
+    /// **one credential per lab**, with a strong random password.
+    ///
+    /// The `vm` argument is retained for API shape and so a future privileged /
+    /// embedded-server backend (strategy 1) can mint genuinely per-VM accounts
+    /// without changing callers; today it does not affect the username.
+    ///
+    /// ⚠ Deviation from PRD §7.5 "a share is mappable only with its owning VM's
+    /// credential": with one unprivileged passdb account, all of a lab's shares
+    /// authenticate with the same credential. Per-VM credential scoping needs
+    /// either root (to create per-VM Unix users) or the embedded SMB2 server of
+    /// strategy 1. `valid users` still gates each share to this single lab
+    /// account, so shares remain authenticated (never anonymous).
     pub fn generate(lab: &str, vm: &str) -> SmbCredentials {
-        let user = sanitize_user(vm);
-        let _ = lab; // lab is the namespacing context; username stays per-vm.
+        let _ = (lab, vm); // see doc: one credential per lab, mapped to the unix user.
         SmbCredentials {
-            username: format!("vmlab-{user}"),
+            username: current_unix_user(),
             password: random_password(),
         }
     }
@@ -61,22 +73,6 @@ fn random_password() -> String {
     (0..24)
         .map(|_| ALPHABET[rng.random_range(0..ALPHABET.len())] as char)
         .collect()
-}
-
-/// Reduce a VM name to a conservative account-name fragment.
-fn sanitize_user(vm: &str) -> String {
-    let s: String = vm
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    let s = s.trim_matches('-').to_string();
-    if s.is_empty() { "vm".to_string() } else { s }
 }
 
 /// One Samba share section — one per VM `share {}` block.
@@ -326,20 +322,17 @@ mod tests {
     }
 
     #[test]
-    fn credentials_distinct_and_strong() {
+    fn credentials_username_is_unix_user_and_password_strong() {
+        // Unprivileged passdb constraint: the SMB username must be a real Unix
+        // account, so it is the invoking user (same for every VM in a lab).
         let a = SmbCredentials::generate("lab", "web");
         let b = SmbCredentials::generate("lab", "db");
-        assert_eq!(a.username, "vmlab-web");
-        assert_eq!(b.username, "vmlab-db");
-        assert_ne!(a.username, b.username);
+        assert_eq!(a.username, current_unix_user());
+        assert_eq!(a.username, b.username);
+        assert!(!a.username.is_empty());
+        // Strong, random passwords (two draws differ with overwhelming odds).
         assert!(a.password.len() >= 20);
         assert_ne!(a.password, b.password);
-    }
-
-    #[test]
-    fn username_sanitized() {
-        let c = SmbCredentials::generate("lab", "Win XP!!");
-        assert_eq!(c.username, "vmlab-win-xp");
     }
 
     #[test]

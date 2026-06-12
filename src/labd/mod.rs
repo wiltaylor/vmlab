@@ -44,6 +44,13 @@ async fn run_async(lab: String, root: PathBuf) -> Result<()> {
     let profiles = crate::profiles::ProfileSet::load_default()?;
     let runtime = LabRuntime::build(config, event_log, &profiles).await?;
 
+    // Bridge any global segments to the supervisor (PRD §9.2). Best-effort:
+    // a failure here is logged but doesn't abort the daemon (lab-local
+    // segments still work).
+    if let Err(e) = runtime.network.lock().await.attach_globals().await {
+        tracing::warn!("attaching global segments: {e:#}");
+    }
+
     let sock = crate::paths::lab_socket(&lab);
     let handler: Arc<dyn Handler> = Arc::new(LabdHandler(runtime.clone()));
     let server = Server::bind_with_events(&sock, handler, events_tx.clone())

@@ -7,6 +7,7 @@ mod config;
 mod labd;
 mod media;
 mod net;
+mod oci;
 mod paths;
 mod profiles;
 mod proto;

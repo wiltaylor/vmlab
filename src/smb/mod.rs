@@ -283,13 +283,13 @@ mod tests {
     }
 
     #[test]
-    fn credentials_distinct_per_vm_and_stable() {
+    fn credentials_present_per_vm_and_stable() {
         let lab = sample();
         let web = lab.credentials("web").unwrap().clone();
         let xp = lab.credentials("xp").unwrap().clone();
-        assert_eq!(web.username, "vmlab-web");
-        assert_eq!(xp.username, "vmlab-xp");
-        assert_ne!(web.username, xp.username);
+        // Unprivileged passdb: username is the Unix user, shared per lab.
+        assert_eq!(web.username, config::current_unix_user());
+        assert_eq!(web.username, xp.username);
         assert!(!web.password.is_empty());
         // stable within the instance
         assert_eq!(lab.credentials("web").unwrap().password, web.password);
@@ -303,9 +303,9 @@ mod tests {
         assert!(cfg.any_smb1); // xp share is smb1
         assert_eq!(cfg.shares.len(), 2);
         assert_eq!(cfg.lab_dir, PathBuf::from("/lab/.vmlab/smb"));
-        // each share scoped to its VM's account
+        // each share scoped to the lab's authenticated account
         let data = cfg.shares.iter().find(|s| s.name == "data").unwrap();
-        assert_eq!(data.allowed_user, "vmlab-xp");
+        assert_eq!(data.allowed_user, config::current_unix_user());
         assert!(data.readonly);
     }
 
@@ -318,7 +318,7 @@ mod tests {
         let joined = steps[0].args.join(" ");
         assert!(joined.contains("//10.0.0.1/src"));
         assert!(joined.contains("vers=3.0"));
-        assert!(joined.contains("username=vmlab-web"));
+        assert!(joined.contains(&format!("username={}", config::current_unix_user())));
     }
 
     #[test]
@@ -332,7 +332,11 @@ mod tests {
                 .command
                 .starts_with("net use Z: \\\\10.0.1.1\\data")
         );
-        assert!(steps[0].command.contains("/user:vmlab-xp"));
+        assert!(
+            steps[0]
+                .command
+                .contains(&format!("/user:{}", config::current_unix_user()))
+        );
     }
 
     #[test]

@@ -166,8 +166,7 @@ pub fn assemble(chunk_paths: &[PathBuf], out: &Path) -> Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("cannot create {}", parent.display()))?;
     }
-    let out_file =
-        File::create(out).with_context(|| format!("cannot create {}", out.display()))?;
+    let out_file = File::create(out).with_context(|| format!("cannot create {}", out.display()))?;
     let mut writer = BufWriter::with_capacity(COPY_BUF, out_file);
 
     for path in chunk_paths {
@@ -281,7 +280,11 @@ mod tests {
         }
 
         // assemble back and verify the bytes are identical
-        let paths: Vec<_> = set.chunks.iter().map(|c| c.compressed_path.clone()).collect();
+        let paths: Vec<_> = set
+            .chunks
+            .iter()
+            .map(|c| c.compressed_path.clone())
+            .collect();
         let reassembled = dir.path().join("out.qcow2");
         assemble(&paths, &reassembled).unwrap();
         assert_eq!(std::fs::read(&reassembled).unwrap(), data);
@@ -293,7 +296,7 @@ mod tests {
     fn ragged_final_chunk() {
         let dir = tempfile::tempdir().unwrap();
         // 2.5 MiB with 1 MiB chunks → 3 chunks, last is 0.5 MiB.
-        let data: Vec<u8> = (0..(2_621_440u32)).map(|i| (i % 255) as u8).collect();
+        let data: Vec<u8> = (0..2_621_440u32).map(|i| (i % 255) as u8).collect();
         let img = dir.path().join("disk.qcow2");
         std::fs::write(&img, &data).unwrap();
         let out = dir.path().join("chunks");
@@ -302,7 +305,11 @@ mod tests {
         assert_eq!(set.chunks[0].uncompressed_size, 1024 * 1024);
         assert_eq!(set.chunks[2].uncompressed_size, 2_621_440 - 2 * 1024 * 1024);
 
-        let paths: Vec<_> = set.chunks.iter().map(|c| c.compressed_path.clone()).collect();
+        let paths: Vec<_> = set
+            .chunks
+            .iter()
+            .map(|c| c.compressed_path.clone())
+            .collect();
         let reassembled = dir.path().join("out.qcow2");
         assemble(&paths, &reassembled).unwrap();
         assert_eq!(std::fs::read(&reassembled).unwrap(), data);
@@ -319,7 +326,11 @@ mod tests {
         assert_eq!(set.chunk_count, 1);
         assert_eq!(set.total_size, 0);
         assert_eq!(set.whole_digest, sha256_hex(b""));
-        let paths: Vec<_> = set.chunks.iter().map(|c| c.compressed_path.clone()).collect();
+        let paths: Vec<_> = set
+            .chunks
+            .iter()
+            .map(|c| c.compressed_path.clone())
+            .collect();
         let reassembled = dir.path().join("out.qcow2");
         assemble(&paths, &reassembled).unwrap();
         assert_eq!(std::fs::read(&reassembled).unwrap().len(), 0);

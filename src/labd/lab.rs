@@ -61,13 +61,40 @@ impl LabRuntime {
                     (Some(resolved.disk_path.clone()), Some(resolved.meta), None)
                 }
                 TemplateRef::Registry { reference } => {
-                    // Pulled on demand by `up` (PRD §6.4) — wired with the
-                    // OCI module; for now require a prior explicit pull.
-                    bail!(
-                        "vm \"{}\": registry template {reference} is not in the local store — \
-                         run `vmlab template pull` first",
-                        vm_cfg.name
-                    );
+                    // A registry reference is pulled on first `up` if absent
+                    // from the store, never re-pulled implicitly (PRD §6.4).
+                    // The store name is the OCI repository's last path
+                    // component; the version is the tag.
+                    let arch = vm_cfg.arch.clone().ok_or_else(|| {
+                        anyhow!(
+                            "vm \"{}\": registry template needs an explicit arch",
+                            vm_cfg.name
+                        )
+                    })?;
+                    let registry = crate::oci::Registry::new(reference)?;
+                    // Store name = the repository's last path component;
+                    // version = the registry tag.
+                    let store_name = registry
+                        .repository()
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or("")
+                        .to_string();
+                    let version = registry.tag().to_string();
+                    let resolved = match store.resolve(&arch, &store_name, Some(&version)) {
+                        Ok(r) => r,
+                        Err(_) => {
+                            let work = crate::paths::template_store_dir().join(".oci-pull");
+                            std::fs::create_dir_all(&work)?;
+                            let meta = registry
+                                .pull(Some(&arch), &store, &work, false)
+                                .await
+                                .with_context(|| format!("pulling {reference}"))?;
+                            let _ = std::fs::remove_dir_all(&work);
+                            store.resolve(&meta.arch, &meta.name, Some(&meta.version))?
+                        }
+                    };
+                    (Some(resolved.disk_path.clone()), Some(resolved.meta), None)
                 }
             };
 

@@ -3,6 +3,7 @@
 //! aggregation. Auto-started by the CLI; runs in the foreground (the CLI
 //! detaches it into its own process group).
 
+pub mod global;
 mod registry;
 
 use std::path::PathBuf;
@@ -14,11 +15,13 @@ use tokio::sync::Mutex;
 
 use crate::proto::server::{Handler, Server, Streamer};
 use crate::proto::{Event, client::Client};
+use global::GlobalSegments;
 use registry::{LabEntry, LabState, Registry};
 
 pub struct Supervisor {
     registry: Mutex<Registry>,
     server_events: tokio::sync::OnceCell<tokio::sync::broadcast::Sender<Event>>,
+    globals: Arc<GlobalSegments>,
 }
 
 /// Entry point for `vmlab __supervisord`.
@@ -32,9 +35,11 @@ async fn run_async() -> Result<()> {
     crate::paths::ensure_dir(&runtime_dir)?;
     crate::paths::ensure_dir(&crate::paths::state_dir())?;
 
+    let host_cfg = crate::config::host::HostConfig::load_default().unwrap_or_default();
     let supervisor = Arc::new(Supervisor {
         registry: Mutex::new(Registry::load()),
         server_events: tokio::sync::OnceCell::new(),
+        globals: GlobalSegments::new(host_cfg.dns_suffix.clone(), host_cfg.psk.clone()),
     });
 
     let sock = crate::paths::supervisor_socket();
@@ -44,11 +49,17 @@ async fn run_async() -> Result<()> {
         .with_context(|| format!("binding {}", sock.display()))?;
     let _ = supervisor.server_events.set(server.events.clone());
 
+    // Cross-host trunk listener (PRD §9.2): enabled when a PSK is configured.
+    // Bind on a fixed port (the peer addresses it as host:port).
+    if let Some(psk) = &host_cfg.psk {
+        let bind: std::net::SocketAddr = ([0, 0, 0, 0], 13947).into();
+        global::spawn_peer_listener(supervisor.globals.clone(), bind, psk.clone());
+    }
+
     tracing::info!("vmlabd listening on {}", sock.display());
     supervisor.adopt_existing_labs().await;
 
     // Disk-space watchdog on the template store's filesystem (PRD §8.1).
-    let host_cfg = crate::config::host::HostConfig::load_default().unwrap_or_default();
     let store_dir = crate::paths::data_dir();
     crate::paths::ensure_dir(&store_dir)?;
     let sup_wd = supervisor.clone();
@@ -257,6 +268,34 @@ impl Handler for SupervisorHandler {
                 let name = args["name"].as_str().ok_or("missing name")?;
                 sup.release_lab(name).await?;
                 Ok(json!(true))
+            }
+            // Global segments (PRD §9.2): attach returns the trunk socket.
+            "global.attach" => {
+                let name = args["name"].as_str().ok_or("missing name")?;
+                let subnet = match args["subnet"].as_str() {
+                    Some(s) => Some(s.parse().map_err(|_| format!("bad subnet `{s}`"))?),
+                    None => None,
+                };
+                let peer = args["peer"].as_str().map(String::from);
+                let sock = sup
+                    .globals
+                    .attach(name, subnet, peer)
+                    .await
+                    .map_err(|e| format!("{e:#}"))?;
+                Ok(json!({"socket": sock}))
+            }
+            "global.detach" => {
+                let name = args["name"].as_str().ok_or("missing name")?;
+                sup.globals.detach(name).await;
+                Ok(json!(true))
+            }
+            "global.list" => {
+                let list = sup.globals.list().await;
+                Ok(json!(
+                    list.into_iter()
+                        .map(|(n, s, r)| json!({"name": n, "subnet": s, "refcount": r}))
+                        .collect::<Vec<_>>()
+                ))
             }
             "shutdown" => {
                 tracing::info!("supervisor shutdown requested");
