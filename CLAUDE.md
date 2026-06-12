@@ -16,7 +16,29 @@ Consult them for prior art only — the PRD overrides anything they did.
 
 ## Status
 
-Scaffold only. Structure will be shaped by the PRD once it lands.
+PRD implemented (M1–M6). Module map under `src/`:
+
+- `config/` — WCL schema, typed model, §5.1 validation, host config, profiles.
+- `profiles/` — guest OS profiles (WCL data, user-overridable).
+- `qemu/` — hardware resolution (VM>template>profile), cmdline builder,
+  firmware lookup, process management.
+- `qmp/`, `qga/` — QMP and guest-agent clients.
+- `template/` — store, qemu-img, builds, artefact cache, store/OCI CLI.
+- `media/` — folder → ISO/floppy with content-addressed cache.
+- `vision/` — screenshot, template matching, OCR.
+- `net/` — userspace fabric: frame codecs, L2 switch, DHCP, DNS, gateway,
+  NAT engine, L3 rules.
+- `proto/` — JSON-lines daemon wire protocol (client + server).
+- `supervisor/` — `vmlabd`: lab registry, global segments, watchdogs.
+- `labd/` — per-lab daemon: lifecycle, snapshots, network assembly, events,
+  SMB integration, the lab runtime the wisp host binds to.
+- `scripting/` — wisp host module (lab/VM/segment API), provisions, handlers.
+- `smb/` — bundled-smbd shared folders.
+- `oci/` — OCI registry push/pull (chunked, multi-arch).
+- `cli/` — the `vmlab` verb surface.
+
+`docs/vmlab-prd.md` remains the binding contract; section refs (`§N`) appear
+throughout the code and commit messages.
 
 ## Conventions
 

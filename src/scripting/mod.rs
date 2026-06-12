@@ -807,3 +807,21 @@ fn handle(event: Event, lab: Lab) {
         assert!(content.contains("Lab"), "{content}");
     }
 }
+
+#[cfg(test)]
+mod example_tests {
+    use super::check_script_source;
+
+    /// The shipped example provision + handler scripts must type-check
+    /// against the host module (keeps docs honest).
+    #[test]
+    fn shipped_examples_compile() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/ad-lab/scripts");
+        for name in ["setup.wisp", "collect-dumps.wisp", "alert.wisp"] {
+            let path = format!("{dir}/{name}");
+            let src =
+                std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {path}: {e}"));
+            check_script_source(&src).unwrap_or_else(|e| panic!("{name}: {e}"));
+        }
+    }
+}

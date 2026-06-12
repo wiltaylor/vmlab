@@ -35,3 +35,9 @@ fmt:
 # Lint, format check, and tests
 [group('check')]
 check: lint fmt-check test
+
+# Build the official runtime container image (PRD §14). Context is the parent
+# directory so the sibling WCL/wisp path deps are available to the build.
+[group('build')]
+image tag='vmlab:latest':
+	docker build -t {{tag}} -f Containerfile ..

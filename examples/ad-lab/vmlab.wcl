@@ -1,0 +1,41 @@
+// Worked example: a small Active Directory lab (PRD §5). Illustrates
+// segments, static IPs (DHCP reservations), dependency ordering, a
+// provision script, and event handlers. Requires the referenced templates
+// in the store and the scripts under scripts/.
+
+import <vmlab.wcl>
+
+lab "ad-lab" {
+
+  segment "corp" {
+    subnet = "10.50.0.0/24"
+    // Hand out the DC as DNS instead of the daemon (AD owns DNS).
+    dns { server = "10.50.0.10" }
+    route { dest = "10.60.0.0/24" via = "10.50.0.254" }
+  }
+
+  segment "dmz" { }
+
+  vm "dc01" {
+    template = "x86_64/windows-server-2025"
+    cpus     = 4
+    memory   = "8G"
+    nic { segment = "corp" ip = "10.50.0.10" }
+  }
+
+  vm "client01" {
+    template   = "x86_64/windows-11@26100.1"
+    depends_on = ["dc01"]
+    nic { segment = "corp" }
+  }
+
+  vm "buildbox" {
+    template = "x86_64/linux-modern"
+    nic { nat = true }
+  }
+
+  provision "scripts/setup.wisp" { vms = ["dc01"] }
+
+  on "vm.crashed"    { run = "scripts/collect-dumps.wisp" }
+  on "host.disk_low" { run = "scripts/alert.wisp" }
+}

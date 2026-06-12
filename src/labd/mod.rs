@@ -323,10 +323,16 @@ impl Handler for LabdHandler {
                 tracing::info!("lab daemon shutdown requested");
                 let lab = lab.clone();
                 tokio::spawn(async move {
-                    // Leave VMs as they are on plain shutdown? No — a lab
-                    // daemon going away must not orphan QEMU processes it
-                    // can no longer manage (PRD §3: the daemon owns them).
+                    // A lab daemon going away must not orphan QEMU processes
+                    // it can no longer manage (PRD §3: the daemon owns them),
+                    // and must release its global-segment references so the
+                    // supervisor can reap shared switches (§9.2).
                     let _ = lab.down(&[], false).await;
+                    // Stop the lab's SMB server cleanly.
+                    if let Some(mut smb) = lab.smb.lock().await.take() {
+                        smb.stop();
+                    }
+                    lab.network.lock().await.detach_globals().await;
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     std::process::exit(0);
                 });
