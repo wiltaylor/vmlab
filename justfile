@@ -43,6 +43,11 @@ check: lint fmt-check test
 image tag='vmlab:latest':
 	docker build -t {{tag}} -f Containerfile ..
 
+# Install the vmlab binary into the user profile (~/.cargo/bin)
+[group('build')]
+install:
+	cargo install --path . --locked
+
 # Bring a lab up (guest windows open when the lab sets `gui = true`)
 [group('lab')]
 lab-up dir='examples/mixed-lab': release
