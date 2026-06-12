@@ -24,3 +24,16 @@ vmlab down                      # clones retained; `vmlab destroy` deletes them
 
 Guest credentials: `Administrator` / `vmlab123!` (Windows), `vmlab` /
 `vmlab` (Ubuntu). The `shared/` folder appears on winsrv as `S:\`.
+
+Note on the share and desktop sessions: Windows drive letters are
+per-logon-session. The daemon maps `S:` in the agent's session (SYSTEM),
+which is what provision scripts and `vmlab exec` see. To use it from the
+desktop you're logged into on the console, map it once in that session —
+the lab's SMB credentials are in `.vmlab/smb/creds` (`user:password`):
+
+```bat
+net use S: \\10.70.0.1\s /user:<user> <password> /persistent:yes
+```
+
+They stay stable across `vmlab up` cycles, so the mapping reconnects on
+every boot until you `vmlab destroy`.

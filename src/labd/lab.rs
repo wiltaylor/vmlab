@@ -200,7 +200,7 @@ impl LabRuntime {
     /// Start the SMB server for the lab's shares and DNAT each relevant
     /// segment gateway's port 445 to it (PRD §7.5). Best-effort: a failure
     /// is logged and the rest of the lab still works. Called from `up`.
-    async fn ensure_smb(self: &Arc<Self>) {
+    async fn ensure_smb(self: &Arc<Self>, output: &crate::scripting::OutputSink) {
         // Collect sharing VMs with their gateway IP (first NIC's segment).
         let mut sharing: Vec<(String, std::net::Ipv4Addr, Vec<crate::config::model::Share>)> =
             Vec::new();
@@ -230,22 +230,41 @@ impl LabRuntime {
             return;
         }
 
-        // Pick a stable-ish high port for smbd.
-        let port = 14450;
-        let mut labsmb = crate::smb::LabSmb::plan(&self.name, &self.lab_local, port, &sharing);
-        let config = labsmb.build_config();
-        match labsmb.spawn(config) {
-            Ok(p) => {
-                tracing::info!("SMB server for lab {} on 127.0.0.1:{p}", self.name);
-                self.events.emit("smb.started", json!({"port": p}));
-            }
-            Err(e) => {
-                tracing::warn!("SMB server failed to start: {e}");
-                self.events
-                    .emit("smb.failed", json!({"error": e.to_string()}));
-                return;
+        // smbd needs a free localhost port; the gateway DNAT hides the
+        // number from guests, so walk upward from a base until one binds
+        // (another lab's smbd — or an orphan from an unclean daemon death —
+        // may hold the earlier ones).
+        let base_port = 14450u16;
+        let mut labsmb = None;
+        let mut last_err = String::new();
+        for port in base_port..base_port + 10 {
+            let mut candidate =
+                crate::smb::LabSmb::plan(&self.name, &self.lab_local, port, &sharing);
+            let config = candidate.build_config();
+            match candidate.spawn(config) {
+                Ok(p) => {
+                    tracing::info!("SMB server for lab {} on 127.0.0.1:{p}", self.name);
+                    output(format!(
+                        "smb: serving shares on 127.0.0.1:{p} (guest mounts \\\\<gateway>\\<share>; credentials in .vmlab/smb/creds)\n"
+                    ));
+                    self.events.emit("smb.started", json!({"port": p}));
+                    labsmb = Some(candidate);
+                    break;
+                }
+                Err(e) => {
+                    tracing::warn!("smbd on port {port} failed: {e}");
+                    last_err = e.to_string();
+                }
             }
         }
+        let Some(labsmb) = labsmb else {
+            tracing::warn!("SMB server failed to start: {last_err}");
+            output(format!(
+                "WARNING: SMB server failed to start — shares will not mount: {last_err}\n"
+            ));
+            self.events.emit("smb.failed", json!({"error": last_err}));
+            return;
+        };
 
         // DNAT gateway:445 → 127.0.0.1:smbd on each sharing segment, so a
         // guest mounting \\<gateway>\<share> reaches the local smbd via NAT.
@@ -309,22 +328,39 @@ impl LabRuntime {
                 if attempt > 0 {
                     tokio::time::sleep(Duration::from_secs(10)).await;
                 }
+                let started = std::time::Instant::now();
                 match qga
                     .exec(&step.command, &args, true, Duration::from_secs(30))
                     .await
                 {
                     Ok(r) if r.exit_code == 0 => {
+                        tracing::info!(
+                            "{vm_name}: mount step `{}` ok (attempt {attempt}, {:?})",
+                            step.command,
+                            started.elapsed()
+                        );
                         last = None;
                         break;
                     }
                     Ok(r) => {
-                        last = Some(format!(
+                        let err = format!(
                             "exited {}: {}",
                             r.exit_code,
                             String::from_utf8_lossy(&r.stderr)
-                        ));
+                        );
+                        tracing::debug!(
+                            "{vm_name}: mount attempt {attempt} ({:?}): {err}",
+                            started.elapsed()
+                        );
+                        last = Some(err);
                     }
-                    Err(e) => last = Some(e.to_string()),
+                    Err(e) => {
+                        tracing::debug!(
+                            "{vm_name}: mount attempt {attempt} ({:?}): {e}",
+                            started.elapsed()
+                        );
+                        last = Some(e.to_string());
+                    }
                 }
             }
             if let Some(err) = last {
@@ -419,7 +455,7 @@ impl LabRuntime {
 
         // Start the SMB server before guests boot so shares are reachable
         // during provisioning (PRD §7.5).
-        self.ensure_smb().await;
+        self.ensure_smb(&output).await;
 
         let mut remaining: Vec<String> = targets.clone();
         let mut done: HashSet<String> = HashSet::new();
@@ -447,6 +483,10 @@ impl LabRuntime {
                 let n = name.clone();
                 handles.push(tokio::spawn(async move {
                     me.start_vm(&n).await?;
+                    // Mount the VM's shares as soon as its agent answers —
+                    // detached, so provisions can rely on them (§7.5)
+                    // without the wave blocking on the mount retry window.
+                    me.spawn_share_mount(&n);
                     // Only gate the wave on readiness when something later
                     // depends on this VM.
                     let dependents = me.config.lab.vms.iter().any(|v| v.depends_on.contains(&n));
@@ -476,17 +516,31 @@ impl LabRuntime {
 
         self.install_declared_forwards().await;
 
-        // Mount SMB shares on ready, agent-having VMs (PRD §7.5).
-        for name in &targets {
-            if let Ok(vm) = self.vm(name)
-                && vm.is_ready().await
-            {
-                self.mount_shares(name).await;
-            }
-        }
-
         self.events.emit("lab.up", json!({"vms": targets}));
         Ok(())
+    }
+
+    /// Mount a VM's SMB shares in a detached task once its agent answers.
+    /// Mounting used to happen at the end of `up`, AFTER the provision
+    /// pass — any provision waiting on a share waited on its own tail.
+    fn spawn_share_mount(self: &Arc<Self>, name: &str) {
+        let has_shares = self
+            .config
+            .lab
+            .vms
+            .iter()
+            .any(|v| v.name == name && !v.shares.is_empty());
+        if !has_shares {
+            return;
+        }
+        let me = self.clone();
+        let n = name.to_string();
+        tokio::spawn(async move {
+            let Ok(vm) = me.vm(&n).cloned() else { return };
+            if vm.wait_ready(Duration::from_secs(600)).await.is_ok() {
+                me.mount_shares(&n).await;
+            }
+        });
     }
 
     /// Wire each segment's declared `forward {}` rules (PRD §9.8) once VMs
@@ -664,6 +718,13 @@ impl LabRuntime {
         }
         for h in handles {
             h.await.map_err(|e| anyhow!("join: {e}"))??;
+        }
+        // Full lab down: reap smbd too, or it outlives the daemon and holds
+        // its port against the next `up`. Partial downs keep shares served.
+        if subset.is_empty()
+            && let Some(mut labsmb) = self.smb.lock().await.take()
+        {
+            labsmb.stop();
         }
         self.events.emit("lab.down", Value::Null);
         Ok(())

@@ -95,9 +95,12 @@ impl LabSmb {
         vms: &[(String, Ipv4Addr, Vec<Share>)],
     ) -> LabSmb {
         let smb_dir = vmlab_dir.join("smb");
+        // One stable credential per lab (see load_or_create) — also keeps
+        // the passdb consistent when several VMs share (same unix user).
+        let lab_creds = SmbCredentials::load_or_create(lab, &smb_dir);
         let mut plans = HashMap::new();
         for (vm_name, gateway, shares) in vms {
-            let creds = SmbCredentials::generate(lab, vm_name);
+            let creds = lab_creds.clone();
             let share_tuples = shares
                 .iter()
                 .map(|s| {

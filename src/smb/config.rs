@@ -24,7 +24,9 @@ use std::process::Command;
 use rand::Rng;
 
 /// Per-VM SMB credential. vmlab generates these automatically and plumbs them
-/// into the guest mount — they are never user-visible (PRD §7.5 access model).
+/// into the guest mount. Persisted per lab under `.vmlab/smb/creds` (0600)
+/// so remembered guest mappings survive daemon restarts, and so a human can
+/// map the share inside an interactive guest session (PRD §7.5 access model).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SmbCredentials {
     pub username: String,
@@ -60,6 +62,37 @@ impl SmbCredentials {
             username: current_unix_user(),
             password: random_password(),
         }
+    }
+
+    /// Load the lab's persisted credential, or mint and persist one.
+    ///
+    /// Stability matters: guests remember mappings (`/persistent:yes`,
+    /// fstab, credential manager). A password that rotated on every
+    /// daemon start turned each remembered mapping into "user name or
+    /// password is incorrect" on the next `up`. The file lives in
+    /// `.vmlab/smb/` so `destroy` wipes it together with the clones.
+    pub fn load_or_create(lab: &str, smb_dir: &std::path::Path) -> SmbCredentials {
+        let path = smb_dir.join("creds");
+        if let Ok(s) = std::fs::read_to_string(&path)
+            && let Some((u, p)) = s.trim().split_once(':')
+            && u == current_unix_user()
+            && !p.is_empty()
+        {
+            return SmbCredentials {
+                username: u.to_string(),
+                password: p.to_string(),
+            };
+        }
+        let c = Self::generate(lab, "");
+        let _ = std::fs::create_dir_all(smb_dir);
+        if std::fs::write(&path, format!("{}:{}", c.username, c.password)).is_ok() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            }
+        }
+        c
     }
 }
 
@@ -178,6 +211,11 @@ impl SmbConfig {
         // No NetBIOS name service needed; we are reached by IP via the proxy.
         out.push_str("    disable netbios = yes\n");
         out.push_str("    smb2 leases = no\n");
+        // Guests reach us as \\<gateway-ip>\..., a name smbd doesn't own.
+        // With msdfs on, DFS-flagged tree connects (Explorer sends them)
+        // die in parse_dfs_path_strict ("Hostname ... is not ours") — the
+        // guest sees error 67.
+        out.push_str("    host msdfs = no\n");
         out.push('\n');
 
         // --- Per-share sections --------------------------------------------

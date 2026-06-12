@@ -19,8 +19,8 @@ fn setup(lab: Lab) -> Result[unit, string] {
     }
     lab.log("nginx serving on nix01 — try: curl http://localhost:18080")
 
-    // The daemon mounts shares when the agent first responds, retrying
-    // until Windows' SMB client is up (~3-4 minutes after first boot).
+    // The daemon mounts shares as soon as the agent responds — S: is
+    // normally there within seconds; the window is just safety margin.
     for i in 0..60 {
         match win.exec("cmd.exe", ["/c", "dir S:"]) {
             Ok(s) => {
@@ -30,6 +30,9 @@ fn setup(lab: Lab) -> Result[unit, string] {
                 }
             }
             Err(e) => lab.log("share check failed: " + e),
+        }
+        if i % 6 == 5 {
+            lab.log(fmt("still waiting for S: on winsrv ({}s)", (i + 1) * 5))
         }
         vmlab::sleep_ms(5000)
     }

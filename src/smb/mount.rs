@@ -87,7 +87,18 @@ pub fn windows_mount_cmds(
     if is_drive_letter(guest_path) {
         // Normalise `X:\` to `X:` for net use.
         let letter = &guest_path[..2];
-        vec![(
+        // A stale remembered mapping on the letter (e.g. from a previous
+        // lab run) blocks the fresh `net use` — clear it first. `exit /b 0`
+        // because "nothing to delete" exits 2 and must not count as a
+        // failed mount step.
+        let cleanup = (
+            "cmd".to_string(),
+            vec![
+                "/c".to_string(),
+                format!("net use {letter} /delete /y & exit /b 0"),
+            ],
+        );
+        let map = (
             "net".to_string(),
             vec![
                 "use".to_string(),
@@ -97,7 +108,8 @@ pub fn windows_mount_cmds(
                 pass.to_string(),
                 "/persistent:yes".to_string(),
             ],
-        )]
+        );
+        vec![cleanup, map]
     } else {
         // Folder-path target: authenticate, then junction the folder to the UNC.
         let auth = (
@@ -185,8 +197,15 @@ mod tests {
     #[test]
     fn windows_drive_letter_net_use() {
         let cmds = windows_mount_cmds(gw(), "data", "X:", "u", "p");
-        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds.len(), 2);
+        // First clears any stale remembered mapping — and must always
+        // exit 0 (the daemon retries failing steps).
         let (prog, args) = &cmds[0];
+        assert_eq!(prog, "cmd");
+        assert!(args[1].contains("net use X: /delete /y"));
+        assert!(args[1].contains("exit /b 0"));
+        // Then maps the drive.
+        let (prog, args) = &cmds[1];
         assert_eq!(prog, "net");
         let joined = args.join(" ");
         assert!(joined.starts_with("use X: \\\\10.0.0.1\\data"));
