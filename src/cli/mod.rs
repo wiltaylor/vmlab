@@ -1,8 +1,10 @@
 //! CLI surface (PRD §12). The same binary also hosts the supervisor and lab
 //! daemons via hidden subcommands, re-exec'd from the CLI as needed.
 
+pub mod console;
 pub mod daemon;
 mod lab;
+pub mod net;
 mod validate;
 
 use clap::{Parser, Subcommand};
@@ -66,6 +68,18 @@ pub enum Command {
     Snapshots { vm: String },
     /// Delete a VM snapshot
     SnapshotDelete { vm: String, name: String },
+    /// Inspect and mutate network rules (PRD §9.9)
+    Net {
+        #[command(subcommand)]
+        cmd: net::NetCmd,
+    },
+    /// Attach a console viewer to a VM (PRD §11)
+    Console {
+        vm: String,
+        /// Forward the VNC display over TCP instead of launching a viewer
+        #[arg(long)]
+        tcp: bool,
+    },
     /// Run an ad-hoc wisp script against the current lab
     Run {
         /// Script path, relative to the lab root
@@ -130,6 +144,8 @@ pub fn run() -> ExitCode {
         Command::Restore { name, vm } => lab::cmd_restore(vm, name),
         Command::Snapshots { vm } => lab::cmd_snapshots(&vm),
         Command::SnapshotDelete { vm, name } => lab::cmd_snapshot_delete(&vm, name),
+        Command::Net { cmd } => net::cmd_net(cmd),
+        Command::Console { vm, tcp } => console::cmd_console(&vm, tcp),
         Command::Run { script } => lab::cmd_run(&script),
         Command::Wispi { out } => crate::scripting::write_interface(&out)
             .map_err(anyhow::Error::from)

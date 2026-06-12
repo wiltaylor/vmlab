@@ -138,40 +138,127 @@ fn run_error(e: wisp::Error) -> String {
     }
 }
 
-// Placeholder impls completed by the rules-engine wiring pass; kept here so
-// the module registration compiles independently.
+/// Runtime mutation of a segment's L3 rules and forwards (PRD §9.9), bridged
+/// from the wisp `Segment` handle into the lab daemon.
 impl SegmentHandle {
+    fn with_services<T>(
+        &self,
+        f: impl FnOnce(&Arc<crate::labd::netservices::SegmentServices>) -> Result<T, String>,
+    ) -> Result<T, String> {
+        self.rt.block_on(async {
+            let net = self.runtime.network.lock().await;
+            let seg = net
+                .segments
+                .get(&self.segment)
+                .ok_or_else(|| format!("segment {} is gone", self.segment))?;
+            let services = seg
+                .services
+                .as_ref()
+                .ok_or_else(|| format!("segment {} has no network services", self.segment))?;
+            f(services)
+        })
+    }
+
     pub(crate) fn rule_block(
         &self,
-        _cidr: &str,
-        _proto: Option<&str>,
-        _port: Option<i64>,
+        cidr: &str,
+        proto: Option<&str>,
+        port: Option<i64>,
     ) -> Result<i64, String> {
-        Err("network rules are not wired for this segment yet".into())
+        use crate::config::model::{BlockRule, L4Proto};
+        let net: ipnet::Ipv4Net = cidr
+            .parse()
+            .or_else(|_| cidr.parse::<std::net::Ipv4Addr>().map(|ip| ip.into()))
+            .map_err(|_| format!("malformed CIDR/IP `{cidr}`"))?;
+        let proto = match proto {
+            None => None,
+            Some("tcp") => Some(L4Proto::Tcp),
+            Some("udp") => Some(L4Proto::Udp),
+            Some("icmp") => Some(L4Proto::Icmp),
+            Some(o) => return Err(format!("unknown proto `{o}`")),
+        };
+        let port = match port {
+            None => None,
+            Some(p) => Some(u16::try_from(p).map_err(|_| format!("port {p} out of range"))?),
+        };
+        let rule = BlockRule {
+            cidr: net,
+            proto,
+            port,
+            span: (0, 0),
+        };
+        self.with_services(|s| {
+            let mut rs = s.rules.lock().map_err(|_| "ruleset poisoned".to_string())?;
+            Ok(rs.add_block(rule).0 as i64)
+        })
     }
 
-    pub(crate) fn rule_remove(&self, _rule_id: i64) -> Result<bool, String> {
-        Err("network rules are not wired for this segment yet".into())
+    pub(crate) fn rule_remove(&self, rule_id: i64) -> Result<bool, String> {
+        self.with_services(|s| {
+            let mut rs = s.rules.lock().map_err(|_| "ruleset poisoned".to_string())?;
+            Ok(rs.remove(crate::net::rules::RuleId(rule_id as u64)))
+        })
     }
 
-    pub(crate) fn rule_redirect(&self, _from: &str, _to: &str) -> Result<i64, String> {
-        Err("network rules are not wired for this segment yet".into())
+    pub(crate) fn rule_redirect(&self, from: &str, to: &str) -> Result<i64, String> {
+        use crate::config::model::{RedirectRule, parse_host_port};
+        let from = parse_host_port(from)?;
+        let to = parse_host_port(to)?;
+        let rule = RedirectRule {
+            from,
+            to,
+            proto: None,
+            span: (0, 0),
+        };
+        self.with_services(|s| {
+            let mut rs = s.rules.lock().map_err(|_| "ruleset poisoned".to_string())?;
+            Ok(rs.add_redirect(rule).0 as i64)
+        })
     }
 
     pub(crate) fn add_forward(
         &self,
-        _host_port: i64,
-        _vm: &str,
-        _guest_port: i64,
+        host_port: i64,
+        vm: &str,
+        guest_port: i64,
     ) -> Result<i64, String> {
-        Err("runtime port forwards are not wired yet".into())
+        let host_port =
+            u16::try_from(host_port).map_err(|_| "host_port out of range".to_string())?;
+        let guest_port =
+            u16::try_from(guest_port).map_err(|_| "guest_port out of range".to_string())?;
+        // Resolve the target VM's leased IP on this segment.
+        let guest_ip = self.rt.block_on(async {
+            self.runtime
+                .vm(vm)
+                .map_err(|e| format!("{e:#}"))?
+                .guest_ip(None)
+                .await
+                .map_err(|e| format!("{e:#}"))
+        })?;
+        let guest_ip: std::net::Ipv4Addr = guest_ip
+            .parse()
+            .map_err(|_| format!("vm {vm} has no IPv4 lease yet"))?;
+        let host_addr = std::net::SocketAddr::from((std::net::Ipv4Addr::UNSPECIFIED, host_port));
+        self.with_services(|s| {
+            s.add_forward(
+                host_addr,
+                guest_ip,
+                guest_port,
+                crate::config::model::Proto::Tcp,
+            )
+            .map(|id| id as i64)
+        })
     }
 
     pub(crate) fn route_to(&self, _other: &str, _enable: bool) -> Result<(), String> {
-        Err("inter-segment routing is not wired yet".into())
+        // Daemon inter-segment routing: explicit opt-in per pair (§9.6).
+        Err("inter-segment routing is not yet available from scripts".into())
     }
 
     pub(crate) fn rules_json(&self) -> Result<String, String> {
-        Err("network rules are not wired yet".into())
+        self.with_services(|s| {
+            let rs = s.rules.lock().map_err(|_| "ruleset poisoned".to_string())?;
+            serde_json::to_string(&rs.list()).map_err(|e| e.to_string())
+        })
     }
 }

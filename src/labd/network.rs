@@ -35,6 +35,8 @@ pub struct SegmentNet {
     /// Gateway service (ARP/ICMP/DHCP/DNS + uplink seam), wired by
     /// [`LabNetwork::wire_gateways`].
     pub gateway: Option<crate::net::gateway::GatewayHandle>,
+    /// NAT + L3 rule services (PRD §9.6–§9.9), wired alongside the gateway.
+    pub services: Option<Arc<super::netservices::SegmentServices>>,
     listeners: Vec<tokio::task::JoinHandle<()>>,
 }
 
@@ -92,6 +94,7 @@ impl LabNetwork {
                     nat: seg.nat,
                     dhcp: seg.dhcp,
                     gateway: None,
+                    services: None,
                     listeners: Vec::new(),
                 },
             );
@@ -118,6 +121,7 @@ impl LabNetwork {
                     nat: true,
                     dhcp: true,
                     gateway: None,
+                    services: None,
                     listeners: Vec::new(),
                 },
             );
@@ -238,7 +242,16 @@ impl LabNetwork {
                 spawn_lease_dns_sync(&handle, &lab.name, macs_by_vm);
             }
 
+            // NAT + L3 rule services on the same switch (§9.6–§9.9). Declared
+            // routes' block/redirect/forward rules are pre-installed.
+            let services =
+                super::netservices::SegmentServices::install(&seg.switch, &handle, seg.nat);
+            if let Some(cfg) = &seg.config {
+                super::netservices::preinstall_rules(&services, cfg, lab);
+            }
+
             seg.gateway = Some(handle);
+            seg.services = Some(services);
         }
     }
 }

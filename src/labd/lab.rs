@@ -299,8 +299,136 @@ impl LabRuntime {
         self.run_provisions(&mut next_provision, &done, true, &output)
             .await?;
 
+        self.install_declared_forwards().await;
+
         self.events.emit("lab.up", json!({"vms": targets}));
         Ok(())
+    }
+
+    /// Wire each segment's declared `forward {}` rules (PRD §9.8) once VMs
+    /// have leases. Best-effort: a forward to a not-yet-ready VM is skipped.
+    async fn install_declared_forwards(self: &Arc<Self>) {
+        for seg in &self.config.lab.segments {
+            for fwd in &seg.forwards {
+                let Ok(vm) = self.vm(&fwd.vm) else { continue };
+                let Ok(ip) = vm.guest_ip(None).await else {
+                    self.events.emit(
+                        "forward.skipped",
+                        json!({"reason": "no lease", "vm": fwd.vm, "host_port": fwd.host_port}),
+                    );
+                    continue;
+                };
+                let Ok(guest_ip) = ip.parse::<std::net::Ipv4Addr>() else {
+                    continue;
+                };
+                let host_addr =
+                    std::net::SocketAddr::from((std::net::Ipv4Addr::UNSPECIFIED, fwd.host_port));
+                let net = self.network.lock().await;
+                if let Some(services) = net
+                    .segments
+                    .get(&seg.name)
+                    .and_then(|s| s.services.as_ref())
+                {
+                    let _ = services.add_forward(host_addr, guest_ip, fwd.guest_port, fwd.proto);
+                }
+            }
+        }
+    }
+
+    /// Inspect L3 rules across the lab's segments (PRD §9.9, `vmlab net
+    /// rules`).
+    pub async fn net_rules(&self) -> Value {
+        let net = self.network.lock().await;
+        let mut segs = Vec::new();
+        for seg in net.segments.values() {
+            let rules = seg
+                .services
+                .as_ref()
+                .and_then(|s| s.rules.lock().ok().map(|r| r.list()))
+                .unwrap_or_default();
+            segs.push(json!({"segment": seg.name, "rules": rules}));
+        }
+        json!(segs)
+    }
+
+    /// Add a block rule from the CLI (`vmlab net block`).
+    pub async fn net_block(&self, segment: &str, cidr: &str) -> Result<u64> {
+        let net = self.network.lock().await;
+        let services = net
+            .segments
+            .get(segment)
+            .and_then(|s| s.services.as_ref())
+            .ok_or_else(|| anyhow!("no segment \"{segment}\""))?;
+        let netcidr: ipnet::Ipv4Net = cidr
+            .parse()
+            .or_else(|_| cidr.parse::<std::net::Ipv4Addr>().map(|ip| ip.into()))
+            .map_err(|_| anyhow!("malformed CIDR/IP `{cidr}`"))?;
+        let mut rs = services
+            .rules
+            .lock()
+            .map_err(|_| anyhow!("ruleset poisoned"))?;
+        Ok(rs
+            .add_block(crate::config::model::BlockRule {
+                cidr: netcidr,
+                proto: None,
+                port: None,
+                span: (0, 0),
+            })
+            .0)
+    }
+
+    /// Add a runtime port forward from the CLI (`vmlab net forward`).
+    pub async fn net_forward(
+        &self,
+        segment: &str,
+        host_port: u16,
+        vm: &str,
+        guest_port: u16,
+    ) -> Result<u64> {
+        let ip = self.vm(vm)?.guest_ip(None).await?;
+        let guest_ip: std::net::Ipv4Addr = ip
+            .parse()
+            .map_err(|_| anyhow!("vm {vm} has no IPv4 lease"))?;
+        let host_addr = std::net::SocketAddr::from((std::net::Ipv4Addr::UNSPECIFIED, host_port));
+        let net = self.network.lock().await;
+        let services = net
+            .segments
+            .get(segment)
+            .and_then(|s| s.services.as_ref())
+            .ok_or_else(|| anyhow!("no segment \"{segment}\""))?;
+        services
+            .add_forward(
+                host_addr,
+                guest_ip,
+                guest_port,
+                crate::config::model::Proto::Tcp,
+            )
+            .map_err(|e| anyhow!(e))
+    }
+
+    /// Redirect rule from the CLI (`vmlab net redirect`).
+    pub async fn net_redirect(&self, segment: &str, from: &str, to: &str) -> Result<u64> {
+        use crate::config::model::{RedirectRule, parse_host_port};
+        let from = parse_host_port(from).map_err(|e| anyhow!(e))?;
+        let to = parse_host_port(to).map_err(|e| anyhow!(e))?;
+        let net = self.network.lock().await;
+        let services = net
+            .segments
+            .get(segment)
+            .and_then(|s| s.services.as_ref())
+            .ok_or_else(|| anyhow!("no segment \"{segment}\""))?;
+        let mut rs = services
+            .rules
+            .lock()
+            .map_err(|_| anyhow!("ruleset poisoned"))?;
+        Ok(rs
+            .add_redirect(RedirectRule {
+                from,
+                to,
+                proto: None,
+                span: (0, 0),
+            })
+            .0)
     }
 
     /// Run provision scripts in strict declaration order starting at

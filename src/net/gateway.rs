@@ -142,6 +142,13 @@ impl GatewayHandle {
     pub fn inject(&self, frame: Bytes) -> bool {
         self.tx.try_send(frame).is_ok()
     }
+
+    /// A detached injector closure (the NAT engine's return path) that
+    /// outlives borrows of the handle.
+    pub fn injector(&self) -> impl Fn(Bytes) -> bool + Send + Sync + 'static {
+        let tx = self.tx.clone();
+        move |frame: Bytes| tx.try_send(frame).is_ok()
+    }
 }
 
 impl Drop for GatewayHandle {
