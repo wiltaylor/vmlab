@@ -141,25 +141,32 @@ pub fn windows_mount_cmds(
 pub const DESKTOP_SCRIPT: &str = "C:\\Users\\Public\\Desktop\\vmlab-shares.cmd";
 
 /// Build the command that (re)writes a double-clickable script on the
-/// guest's shared desktop mapping every drive-letter share. Drive letters
-/// are per-logon-session — the agent's own mounts (SYSTEM session) are
-/// invisible to the console desktop, so interactive users run this once;
-/// `/persistent:yes` + stable lab credentials keep it connected across
-/// reboots.
+/// guest's shared desktop authenticating the lab shares for the user who
+/// runs it.
+///
+/// The agent's mounts run as SYSTEM, whose drive mappings land in the
+/// GLOBAL DOS-device namespace: every session *sees* the letters, but each
+/// logon authenticates separately — interactive users hit "user name or
+/// password is incorrect" (and `net use X:` says "already in use", error
+/// 85). A Credential Manager entry for the gateway makes the existing
+/// letters work, so the script is one `cmdkey /add` per lab, not `net use`.
 pub fn windows_desktop_script_cmd(
     gateway: Ipv4Addr,
-    shares: &[(&str, &str)], // (share name, drive letter "X:")
+    shares: &[(&str, &str)], // (share name, drive letter "X:") — for the message
     user: &str,
     pass: &str,
 ) -> (String, Vec<String>) {
-    let mut lines = vec!["@echo off".to_string()];
-    for (share, letter) in shares {
-        lines.push(format!("net use {letter} /delete /y"));
-        lines.push(format!(
-            "net use {letter} \\\\{gateway}\\{share} /user:{user} {pass} /persistent:yes"
-        ));
-    }
-    lines.push("pause".to_string());
+    let letters: Vec<&str> = shares.iter().map(|(_, l)| *l).collect();
+    let lines = vec![
+        "@echo off".to_string(),
+        format!("cmdkey /delete:{gateway}"),
+        format!("cmdkey /add:{gateway} /user:{user} /pass:{pass}"),
+        format!(
+            "echo Lab shares authenticated - {} now open in Explorer.",
+            letters.join(" ")
+        ),
+        "pause".to_string(),
+    ];
     let echoes: Vec<String> = lines.into_iter().map(|l| format!("echo {l}")).collect();
     (
         "cmd".to_string(),
@@ -248,14 +255,14 @@ mod tests {
     }
 
     #[test]
-    fn windows_desktop_script_writes_all_letters() {
+    fn windows_desktop_script_stores_session_credential() {
         let (prog, args) =
             windows_desktop_script_cmd(gw(), &[("data", "X:"), ("src", "Y:")], "u", "p");
         assert_eq!(prog, "cmd");
         let script = &args[1];
-        assert!(script.contains("echo net use X: /delete /y"));
-        assert!(script.contains("echo net use X: \\\\10.0.0.1\\data /user:u p /persistent:yes"));
-        assert!(script.contains("echo net use Y: \\\\10.0.0.1\\src /user:u p /persistent:yes"));
+        assert!(script.contains("echo cmdkey /delete:10.0.0.1"));
+        assert!(script.contains("echo cmdkey /add:10.0.0.1 /user:u /pass:p"));
+        assert!(script.contains("X: Y:"));
         assert!(script.ends_with(&format!("> {DESKTOP_SCRIPT}")));
     }
 

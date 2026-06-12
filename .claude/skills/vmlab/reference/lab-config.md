@@ -134,9 +134,13 @@ vm "name" {
 Hardware precedence: **VM block > template metadata > profile > defaults**.
 
 SMB shares: served by the lab daemon at the segment gateway
-(`\\<gateway>\<share>`); credentials auto-generated per lab; guest agent
-mounts them once the VM is ready. Share contents are outside snapshot scope.
+(`\\<gateway>\<share>`); credentials auto-generated per lab, persisted in
+`.vmlab/smb/creds` (rotated only by `destroy`); guest agent mounts them
+once the VM is ready. Share contents are outside snapshot scope.
 The VM must have a NIC on a segment (validation error otherwise).
+Windows: the agent mounts as SYSTEM (visible to provisions/`vmlab exec`);
+interactive users double-click the auto-dropped `vmlab-shares` desktop
+script once to authenticate their own session.
 
 ## Provisions and event handlers
 
