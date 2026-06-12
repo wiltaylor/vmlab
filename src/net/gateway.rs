@@ -25,8 +25,8 @@ use crate::config::model::MacAddr;
 use crate::net::dhcp::{DHCP_SERVER_PORT, DhcpConfig, DhcpServer};
 use crate::net::dns::{DNS_PORT, DnsAction, DnsServer, DnsZone, forward_upstream};
 use crate::net::frame::{
-    ArpOp, ArpView, ETHERTYPE_ARP, ETHERTYPE_IPV4, EthView, IPPROTO_UDP, Ipv4View, UdpView,
-    arp_reply_build, eth_build, icmp_echo_reply_for,
+    ArpOp, ArpView, ETHERTYPE_ARP, ETHERTYPE_IPV4, EthView, IPPROTO_ICMP, IPPROTO_UDP, Ipv4View,
+    UdpView, arp_reply_build, eth_build, icmp_echo_reply_for,
 };
 use crate::net::switch::{ChannelPort, PortClass, PortId, Switch};
 
@@ -286,16 +286,21 @@ impl GatewayTask {
         }
 
         if ip.dst() == self.gw_ip {
-            // ICMP echo to the gateway itself.
-            if let Some(reply) = icmp_echo_reply_for(eth.payload()) {
-                self.send(eth_build(
-                    eth.src_mac(),
-                    self.gw_mac,
-                    ETHERTYPE_IPV4,
-                    &reply,
-                ));
+            // ICMP echo to the gateway itself is answered here. Other
+            // gateway-addressed traffic falls through to the uplink: TCP
+            // replies to engine-originated flows (port forwards, §9.8) and
+            // gateway-terminated services land in the NAT engine.
+            if ip.proto() == IPPROTO_ICMP {
+                if let Some(reply) = icmp_echo_reply_for(eth.payload()) {
+                    self.send(eth_build(
+                        eth.src_mac(),
+                        self.gw_mac,
+                        ETHERTYPE_IPV4,
+                        &reply,
+                    ));
+                }
+                return;
             }
-            return;
         }
 
         // Addressed to the gateway MAC but not its IP: a guest routing
@@ -579,6 +584,46 @@ mod tests {
         let got = timeout(Duration::from_secs(2), urx.recv())
             .await
             .expect("timed out waiting for uplink frame")
+            .expect("uplink channel closed");
+        assert_eq!(got, frame);
+    }
+
+    /// TCP addressed to the gateway IP itself must reach the uplink — it
+    /// carries replies to engine-originated flows (port forwards, §9.8)
+    /// and DNAT'd gateway services (§7.5). Only ICMP echo is terminated
+    /// by the gateway.
+    #[tokio::test]
+    async fn gw_ip_tcp_reaches_uplink() {
+        let sw = Switch::new("seg".into());
+        let gw = Gateway::spawn(&sw, config());
+        let guest = sw.add_channel_port(PortClass::Guest { isolated: false });
+
+        let (utx, mut urx) = mpsc::unbounded_channel::<Bytes>();
+        gw.set_uplink(Box::new(move |f| {
+            let _ = utx.send(f);
+        }));
+
+        let tcp = crate::net::frame::tcp_build(
+            GUEST_IP,
+            gw.gw_ip(),
+            crate::net::frame::TcpFields {
+                src_port: 5555,
+                dst_port: 445,
+                seq: 1,
+                ack: 0,
+                flags: 0x02, // SYN
+                window: 65535,
+                options: &[],
+            },
+            &[],
+        );
+        let ipp = ipv4_build(GUEST_IP, gw.gw_ip(), 6, 64, &tcp, 22);
+        let frame = Bytes::from(eth_build(gw.gw_mac(), GUEST_MAC, ETHERTYPE_IPV4, &ipp));
+        guest.tx.send(frame.clone()).await.unwrap();
+
+        let got = timeout(Duration::from_secs(2), urx.recv())
+            .await
+            .expect("gw-addressed TCP never reached the uplink")
             .expect("uplink channel closed");
         assert_eq!(got, frame);
     }

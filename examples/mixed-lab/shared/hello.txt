@@ -1,0 +1,2 @@
+Hello from the vmlab host! This folder is the `share` block in vmlab.wcl;
+it shows up on winsrv as S:\ once the guest agent reports ready.

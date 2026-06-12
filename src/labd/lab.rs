@@ -212,7 +212,11 @@ impl LabRuntime {
                 let Some(seg) = net.segments.get(seg_name) else {
                     continue;
                 };
-                sharing.push((vm.name.clone(), seg.gateway_ip, vm.shares.clone()));
+                let mut shares = vm.shares.clone();
+                for s in &mut shares {
+                    s.host = resolve_share_host(&self.root, &s.host);
+                }
+                sharing.push((vm.name.clone(), seg.gateway_ip, shares));
                 if !seg_ports.contains(&seg_name.to_string()) {
                     seg_ports.push(seg_name.to_string());
                 }
@@ -281,28 +285,46 @@ impl LabRuntime {
         let smb = self.smb.lock().await;
         let Some(labsmb) = smb.as_ref() else { return };
 
-        // Detect the guest OS family from the profile / agent.
-        let os_hint = guest_os_hint(cfg);
-        let steps = labsmb.mount_plan(vm_name, os_hint);
+        // Detect the guest OS family from the resolved profile (which folds
+        // in template metadata — the lab vm block usually omits `profile`).
         let Ok(vm) = self.vm(vm_name) else { return };
+        let os_hint = guest_os_hint(vm.resolved.profile.as_deref());
+        let steps = labsmb.mount_plan(vm_name, os_hint);
         let Ok(qga) = vm.qga().await else {
             tracing::warn!("{vm_name}: no agent, cannot auto-mount shares");
             return;
         };
         for step in steps {
             let args: Vec<&str> = step.args.iter().map(String::as_str).collect();
-            match qga
-                .exec(&step.command, &args, true, Duration::from_secs(30))
-                .await
-            {
-                Ok(r) if r.exit_code == 0 => {}
-                Ok(r) => tracing::warn!(
-                    "{vm_name}: mount step `{}` exited {}: {}",
-                    step.command,
-                    r.exit_code,
-                    String::from_utf8_lossy(&r.stderr)
-                ),
-                Err(e) => tracing::warn!("{vm_name}: mount step failed: {e}"),
+            // Early after boot Windows can't run the mount yet: the agent
+            // briefly fails to spawn children, then `net use` returns
+            // error 67 until the SMB client service is up (observed ~3-4
+            // minutes on Server 2025) — retry across a generous window.
+            let mut last: Option<String> = None;
+            for attempt in 0..30 {
+                if attempt > 0 {
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                }
+                match qga
+                    .exec(&step.command, &args, true, Duration::from_secs(30))
+                    .await
+                {
+                    Ok(r) if r.exit_code == 0 => {
+                        last = None;
+                        break;
+                    }
+                    Ok(r) => {
+                        last = Some(format!(
+                            "exited {}: {}",
+                            r.exit_code,
+                            String::from_utf8_lossy(&r.stderr)
+                        ));
+                    }
+                    Err(e) => last = Some(e.to_string()),
+                }
+            }
+            if let Some(err) = last {
+                tracing::warn!("{vm_name}: mount step `{}` failed: {err}", step.command);
             }
         }
     }
@@ -794,11 +816,26 @@ impl LabRuntime {
     }
 }
 
+/// Resolve a share's host path for smb.conf: `~` against $HOME, relative
+/// paths against the lab root — smbd's cwd is not the lab's, so a literal
+/// `./shared` would canonicalize to `/shared` and fail every tree connect.
+fn resolve_share_host(root: &std::path::Path, host: &std::path::Path) -> PathBuf {
+    if let Ok(rest) = host.strip_prefix("~")
+        && let Some(home) = std::env::var_os("HOME")
+    {
+        return PathBuf::from(home).join(rest);
+    }
+    if host.is_relative() {
+        return root.join(host);
+    }
+    host.to_path_buf()
+}
+
 /// Guess the guest OS family for SMB mount-command selection (PRD §7.5).
 /// Heuristic from the resolved profile name; Windows profiles → Windows,
 /// the legacy profile → XP-era, everything else → Linux.
-fn guest_os_hint(vm: &crate::config::model::Vm) -> crate::smb::OsHint {
-    match vm.profile.as_deref() {
+fn guest_os_hint(profile: Option<&str>) -> crate::smb::OsHint {
+    match profile {
         Some("windows-legacy") => crate::smb::OsHint::WindowsXp,
         Some(p) if p.starts_with("windows") => crate::smb::OsHint::Windows,
         _ => crate::smb::OsHint::Linux,

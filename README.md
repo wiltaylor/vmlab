@@ -51,6 +51,22 @@ vmlab down         # graceful stop; clones retained
 vmlab destroy      # stop + delete clones and lab-local state
 ```
 
+## Examples
+
+Worked examples under `examples/`, all built and run end-to-end:
+
+- `templates/ubuntu-24.04/` — Ubuntu Server 24.04 template: ISO download +
+  sha256 verify, cloud-init autoinstall via a CIDATA media block, OCR-driven
+  confirmation in wisp.
+- `templates/windows-server-2025/` — Windows Server 2025 (eval) template:
+  fully unattended autounattend.xml install with virtio drivers, guest
+  agent on first logon, boot-prompt handling in wisp.
+- `mixed-lab/` — a two-VM Windows + Linux lab using both templates:
+  static IP, boot ordering, SMB share onto `S:`, host port-forward, and a
+  provision script driving both guests.
+- `ad-lab/` — a larger Active Directory lab definition (config + scripts
+  reference; templates for the client VM not included).
+
 ## CLI
 
 | Verb | Action |

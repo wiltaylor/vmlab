@@ -1,3 +1,4 @@
 /target
 /.vmlab
 *.wispi
+examples/**/.vmlab/

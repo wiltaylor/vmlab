@@ -252,9 +252,20 @@ fn synth_lab(
     if let Some(c) = cdrom {
         writeln!(s, "    cdrom    = \"{}\"", c.display()).unwrap();
     }
-    // Builds get internet egress by default (agent/package install).
+    // Template-declared NICs carry over. The synthetic lab declares no
+    // segments, so only NAT NICs make sense here — segment references are
+    // rewritten to NAT. Builds with no NICs declared get internet egress by
+    // default (agent/package install).
     if def.nics.is_empty() {
         writeln!(s, "    nic {{ nat = true }}").unwrap();
+    } else {
+        for n in &def.nics {
+            let mut attrs = String::from("nat = true");
+            if let Some(mac) = &n.mac {
+                write!(attrs, " mac = \"{mac}\"").unwrap();
+            }
+            writeln!(s, "    nic {{ {attrs} }}").unwrap();
+        }
     }
     // Media (driver/answer-file ISOs/floppies, §6.3) carry over, resolved
     // relative to the original file's root.
@@ -283,4 +294,42 @@ fn synth_lab(
     }
     writeln!(s, "}}").unwrap();
     Ok(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::synth_lab;
+    use std::path::Path;
+
+    fn def(source: &str) -> crate::config::model::TemplateDef {
+        let tf = crate::config::load_template_source(source, "<test>", Path::new("/root")).unwrap();
+        tf.templates.into_iter().next().unwrap()
+    }
+
+    /// A template-declared NIC must reach the synthetic build lab (it used
+    /// to be silently dropped, booting the build VM with `-nic none`).
+    #[test]
+    fn declared_nic_carries_into_build_lab() {
+        let d = def(concat!(
+            "import <vmlab.wcl>\n",
+            "template \"t\" { arch = \"x86_64\" version = \"1\"\n",
+            "  source \"scratch\" { }\n",
+            "  nic { nat = true }\n",
+            "}\n"
+        ));
+        let wcl = synth_lab(&d, "build-t", "build", None, Path::new("/root")).unwrap();
+        assert!(wcl.contains("nic { nat = true }"), "{wcl}");
+    }
+
+    #[test]
+    fn no_nics_defaults_to_nat() {
+        let d = def(concat!(
+            "import <vmlab.wcl>\n",
+            "template \"t\" { arch = \"x86_64\" version = \"1\"\n",
+            "  source \"scratch\" { }\n",
+            "}\n"
+        ));
+        let wcl = synth_lab(&d, "build-t", "build", None, Path::new("/root")).unwrap();
+        assert!(wcl.contains("nic { nat = true }"), "{wcl}");
+    }
 }

@@ -1,0 +1,28 @@
+// Ubuntu Server 24.04 template (PRD §6.1). The installer ISO is downloaded
+// and sha256-verified into the artefact cache; cloudinit/ is packed into a
+// CIDATA ISO that subiquity picks up as a NoCloud autoinstall source. The
+// provision script answers the autoinstall confirmation and waits for the
+// installer to power the VM off. Build with:
+//
+//   vmlab template build        (run from this directory)
+
+import <vmlab.wcl>
+
+template "ubuntu-24.04" {
+  arch    = "x86_64"
+  version = "24.04.4"
+  profile = "linux-modern"
+  cpus    = 2
+  memory  = "4G"
+  disk    = "20G"
+
+  source "iso" {
+    url    = "https://releases.ubuntu.com/24.04/ubuntu-24.04.4-live-server-amd64.iso"
+    sha256 = "e907d92eeec9df64163a7e454cbc8d7755e8ddc7ed42f99dbc80c40f1a138433"
+  }
+
+  media { kind = "iso" from = "./cloudinit/" label = "CIDATA" }
+  nic { nat = true }
+
+  provision "scripts/install.wisp" { }
+}

@@ -1,0 +1,25 @@
+#cloud-config
+# Subiquity autoinstall (NoCloud, picked up from the CIDATA ISO).
+# Credentials baked into the template: vmlab / vmlab.
+autoinstall:
+  version: 1
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  storage:
+    layout:
+      name: direct
+  identity:
+    hostname: ubuntu
+    username: vmlab
+    password: "$6$msm7717SQBFhDWd8$Or75iQS6wZyqEqcm3QhWTz8gktMIHyvDmqWhs8rATckOUtgRZyTfuQ5C2lPMKnN9PQGF5FxJwYDaU6wGafA/z0"
+  ssh:
+    install-server: true
+    allow-pw: true
+  packages:
+    - qemu-guest-agent
+  late-commands:
+    - curtin in-target -- systemctl enable qemu-guest-agent.service
+  # Power off instead of rebooting back into the installer ISO; the build
+  # seals the disk once the VM is down.
+  shutdown: poweroff

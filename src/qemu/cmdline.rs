@@ -175,7 +175,16 @@ pub fn build_args(
         add_disk(&mut a, path, vm.disk_bus);
     }
 
-    // CD-ROMs ride IDE/SATA on every profile — universally bootable.
+    // CD-ROMs ride IDE/SATA on every profile — universally bootable. q35's
+    // AHCI ports hold a single unit each and QEMU's auto-placement does not
+    // advance past the first port, so address ports explicitly there,
+    // skipping any ports the IDE/SATA disks above already claimed. Legacy
+    // `pc` IDE buses take two units and auto-place fine.
+    let sata_disks = match vm.disk_bus {
+        DiskBus::Virtio => 0,
+        DiskBus::Ide | DiskBus::Sata => disk_index,
+    };
+    let ahci = vm.machine.starts_with("q35");
     for (i, iso) in paths.cdroms.iter().enumerate() {
         a.push("-blockdev".into());
         a.push(format!(
@@ -183,7 +192,11 @@ pub fn build_args(
             iso.display()
         ));
         a.push("-device".into());
-        a.push(format!("ide-cd,drive=cd{i}"));
+        if ahci {
+            a.push(format!("ide-cd,drive=cd{i},bus=ide.{}", sata_disks + i));
+        } else {
+            a.push(format!("ide-cd,drive=cd{i}"));
+        }
     }
 
     if let Some(floppy) = &paths.floppy {
@@ -288,6 +301,7 @@ mod tests {
         let p = profiles.get(profile).unwrap();
         ResolvedVm {
             name: "t".into(),
+            profile: Some(profile.into()),
             arch: arch.into(),
             cpus: 2,
             memory: 2 << 30,
@@ -407,5 +421,21 @@ mod tests {
         assert!(s.contains("ide-cd,drive=cd0"));
         assert!(s.contains("ide-cd,drive=cd1"));
         assert!(s.contains("if=floppy,format=raw,file=/lab/.vmlab/media/drivers.img"));
+    }
+
+    /// Two CD-ROMs on q35 must land on distinct AHCI ports (a port holds a
+    /// single unit; auto-placement would stack them on ide.0 and fail).
+    #[test]
+    fn q35_cdroms_get_their_own_ahci_ports() {
+        let vm = resolved("linux-modern", "x86_64");
+        let mut p = paths();
+        p.ovmf_vars = Some("/v".into());
+        p.cdroms = vec![
+            "/isos/installer.iso".into(),
+            "/lab/.vmlab/media/cidata.iso".into(),
+        ];
+        let s = joined(&build_args("l", &vm, &p, Accel::Kvm).unwrap());
+        assert!(s.contains("ide-cd,drive=cd0,bus=ide.0"), "{s}");
+        assert!(s.contains("ide-cd,drive=cd1,bus=ide.1"), "{s}");
     }
 }

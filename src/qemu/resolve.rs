@@ -10,6 +10,9 @@ use crate::template::TemplateMeta;
 #[derive(Debug, Clone)]
 pub struct ResolvedVm {
     pub name: String,
+    /// Effective profile name (vm.profile > template.profile), if any —
+    /// consumers like SMB mount-command selection key off it.
+    pub profile: Option<String>,
     pub arch: String,
     pub cpus: u32,
     /// Bytes.
@@ -111,6 +114,7 @@ pub fn resolve_vm(
 
     Ok(ResolvedVm {
         name: lab_vm.name.clone(),
+        profile: profile_name,
         arch,
         cpus: lab_vm
             .cpus

@@ -77,7 +77,7 @@ impl SegmentServices {
         }));
 
         let nat = if nat_enabled {
-            Some(spawn_nat(switch, gateway, gw_mac))
+            Some(spawn_nat(switch, gateway, gw_mac, rules.clone()))
         } else {
             None
         };
@@ -94,15 +94,39 @@ impl SegmentServices {
 /// Build the NAT engine. Its output (frames toward guests) is injected back
 /// through the gateway port; the gateway's uplink feeds it off-segment
 /// frames. No extra switch port is needed — the gateway already has one.
-fn spawn_nat(_switch: &Arc<Switch>, gateway: &GatewayHandle, gw_mac: MacAddr) -> Arc<NatEngine> {
+fn spawn_nat(
+    _switch: &Arc<Switch>,
+    gateway: &GatewayHandle,
+    gw_mac: MacAddr,
+    rules: Arc<Mutex<RuleSet>>,
+) -> Arc<NatEngine> {
     let (out_tx, mut out_rx) = tokio::sync::mpsc::channel::<Bytes>(1024);
     let cfg = NatConfig::new(gateway.gw_ip(), gw_mac);
     let engine = NatEngine::new(cfg, out_tx);
 
-    // Forward NAT output into the switch via the gateway port.
+    // Forward NAT output into the switch via the gateway port. Replies
+    // sourced from a redirect target are un-NAT'd first (§9.9) — the guest
+    // expects them from the address it originally dialled.
     let inject = gateway.injector();
     tokio::spawn(async move {
         while let Some(frame) = out_rx.recv().await {
+            let frame = {
+                let rewritten = EthView::parse(&frame)
+                    .filter(|eth| eth.ethertype() == ETHERTYPE_IPV4)
+                    .and_then(|eth| {
+                        let verdict = {
+                            let rs = rules.lock().expect("ruleset poisoned");
+                            rs.eval_return(eth.payload())
+                        };
+                        match verdict {
+                            Verdict::Rewrite(ip) => {
+                                Some(wrap_eth(eth.src_mac(), eth.dst_mac(), &ip))
+                            }
+                            _ => None,
+                        }
+                    });
+                rewritten.unwrap_or(frame)
+            };
             if !inject(frame) {
                 tracing::debug!("NAT output dropped: gateway port full/closed");
             }
