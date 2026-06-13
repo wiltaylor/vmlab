@@ -22,7 +22,14 @@ pub enum TemplateCmd {
         name: Option<String>,
     },
     /// List templates in the store
-    List,
+    List {
+        /// Emit a JSON array instead of a table
+        #[arg(long)]
+        json: bool,
+    },
+    /// Check whether a template is in the store (`<arch>/<name>[@<version>]`).
+    /// Prints the resolved ref and exits 0 if present; exits nonzero if not.
+    Exists { reference: String },
     /// Remove a template (`<arch>/<name>[@<version>]`)
     Rm {
         reference: String,
@@ -77,7 +84,8 @@ pub fn cmd_template(cmd: TemplateCmd) -> Result<()> {
     rt.block_on(async {
         match cmd {
             TemplateCmd::Build { file, name } => build(file, name).await,
-            TemplateCmd::List => list(),
+            TemplateCmd::List { json } => list(json),
+            TemplateCmd::Exists { reference } => exists(&reference),
             TemplateCmd::Rm { reference, force } => rm(&reference, force),
             TemplateCmd::Export { reference, out } => export(&reference, &out),
             TemplateCmd::Import { archive, overwrite } => import(&archive, overwrite),
@@ -130,8 +138,13 @@ async fn build(file: Option<PathBuf>, only: Option<String>) -> Result<()> {
     Ok(())
 }
 
-fn list() -> Result<()> {
+fn list(json: bool) -> Result<()> {
     let templates = store().list()?;
+    if json {
+        let entries: Vec<_> = templates.iter().map(meta_json).collect();
+        println!("{}", serde_json::to_string_pretty(&entries)?);
+        return Ok(());
+    }
     if templates.is_empty() {
         println!("no templates in the store");
         return Ok(());
@@ -146,6 +159,44 @@ fn list() -> Result<()> {
             t.created.format("%Y-%m-%d")
         );
     }
+    Ok(())
+}
+
+/// Fixed-shape JSON for scripting: every key always present (null when
+/// the template does not record it), sizes in bytes, created as RFC 3339.
+fn meta_json(t: &crate::template::meta::TemplateMeta) -> serde_json::Value {
+    serde_json::json!({
+        "arch": t.arch,
+        "name": t.name,
+        "version": t.version,
+        "ref": format!("{}/{}@{}", t.arch, t.name, t.version),
+        "profile": t.profile,
+        "cpus": t.cpus,
+        "memory": t.memory,
+        "disk": t.disk,
+        "firmware": t.firmware,
+        "tpm": t.tpm,
+        "secure_boot": t.secure_boot,
+        "display": t.display,
+        "created": t.created.to_rfc3339(),
+        "origin": t.origin,
+        "sha256": t.sha256,
+    })
+}
+
+fn exists(reference: &str) -> Result<()> {
+    let (arch, name, version) = parse_store_ref(reference)?;
+    let resolved =
+        store()
+            .resolve(&arch, &name, version.as_deref())
+            .map_err(|_| match &version {
+                Some(v) => anyhow!("{arch}/{name}@{v} not in the store"),
+                None => anyhow!("{arch}/{name} not in the store"),
+            })?;
+    println!(
+        "{}/{}@{}",
+        resolved.meta.arch, resolved.meta.name, resolved.meta.version
+    );
     Ok(())
 }
 
