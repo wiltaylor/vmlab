@@ -326,32 +326,6 @@ impl Handler for LabdHandler {
                 Ok(json!(true))
             }
             "snapshot.list" => lab.snapshots(&vm_arg(&args)?).await.map_err(err),
-            // Network rule inspection + mutation (PRD §9.9, §12 `vmlab net`).
-            "net.rules" => Ok(lab.net_rules().await),
-            "net.block" => {
-                let seg = args["segment"].as_str().ok_or("missing segment")?;
-                let cidr = args["cidr"].as_str().ok_or("missing cidr")?;
-                let id = lab.net_block(seg, cidr).await.map_err(err)?;
-                Ok(json!({ "id": id }))
-            }
-            "net.forward" => {
-                let seg = args["segment"].as_str().ok_or("missing segment")?;
-                let host_port = args["host_port"].as_u64().ok_or("missing host_port")? as u16;
-                let vm = args["vm"].as_str().ok_or("missing vm")?;
-                let guest_port = args["guest_port"].as_u64().ok_or("missing guest_port")? as u16;
-                let id = lab
-                    .net_forward(seg, host_port, vm, guest_port)
-                    .await
-                    .map_err(err)?;
-                Ok(json!({ "id": id }))
-            }
-            "net.redirect" => {
-                let seg = args["segment"].as_str().ok_or("missing segment")?;
-                let from = args["from"].as_str().ok_or("missing from")?;
-                let to = args["to"].as_str().ok_or("missing to")?;
-                let id = lab.net_redirect(seg, from, to).await.map_err(err)?;
-                Ok(json!({ "id": id }))
-            }
             "shutdown" => {
                 tracing::info!("lab daemon shutdown requested");
                 let lab = lab.clone();
