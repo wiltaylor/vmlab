@@ -407,14 +407,14 @@ Declared in WCL (`forward { host_port = 13389 to = "dc01:3389" }`) or created at
 
 ### 9.9 Filtering and redirection
 
-Two enforcement layers, declared in WCL and **mutable at runtime from wisp scripts and the CLI** — runtime mutation is a first-class lab scenario ("block the DC, watch the client fail over"):
+Two enforcement layers, declared in WCL and **mutable at runtime from wisp scripts** — runtime mutation is a first-class lab scenario ("block the DC, watch the client fail over"). Static filtering and redirection belong in `vmlab.wcl`; there is no `vmlab net` CLI surface:
 
 - **DNS rules** (per segment or lab): sinkhole a name (NXDOMAIN or 0.0.0.0) or override it to a chosen IP. Wildcards supported (`*.telemetry.example.com`). Only effective for guests using the segment DNS.
 - **L3 rules at the switch** (per segment): match on IP/CIDR and optionally protocol/port.
   - **block** — drop, answering with ICMP unreachable / TCP RST where feasible so guests fail fast.
   - **redirect** — DNAT: traffic to X[:port] rewritten to Y[:port], with the daemon maintaining the connection state to rewrite return traffic.
 
-Evaluation order: redirect rules before block rules; within a layer, most-specific match wins; ties broken by declaration order. The full resolution algorithm must be specified precisely in the implementation design doc and surfaced via `vmlab net rules` for inspection.
+Evaluation order: redirect rules before block rules; within a layer, most-specific match wins; ties broken by declaration order. The full resolution algorithm must be specified precisely in the implementation design doc.
 
 ---
 
@@ -521,14 +521,14 @@ Every VM gets a VNC display served on a unix socket (TCP optional, off by defaul
 | `vmlab destroy` | Stop + delete clones, lab-local state, dynamic net config |
 | `vmlab status` | Lab/VM/segment state, IPs, ready flags |
 | `vmlab validate` | Full §5.1 validation, no side effects |
-| `vmlab snapshot / restore / snapshots` | Per-VM or lab-wide |
+| `vmlab vm start / stop / restart <vm>` | Per-VM power control |
+| `vmlab snapshot create / restore / list / delete` | Per-VM or lab-wide (§7.3) |
 | `vmlab console <vm>` | Attach viewer |
 | `vmlab exec [--timeout s] <vm> -- cmd` | Guest-agent exec |
 | `vmlab cp <src> <vm>:<dest>` | Copy a host file/tree into a guest via the agent |
 | `vmlab osinfo <vm>` | Guest OS identification as JSON |
 | `vmlab run <script.wisp>` | Ad-hoc script against the current lab |
 | `vmlab logs [lab/][vm]` | Tail/dump JSON-line logs |
-| `vmlab net rules / forward / block / redirect` | Inspect + mutate network rules |
 | `vmlab template build / list / rm / export / import` | Template store |
 | `vmlab template push / pull / login` | OCI registry distribution (§6.4) |
 | `vmlab media build` | Folder → ISO/floppy |

@@ -5,7 +5,6 @@ pub mod console;
 pub mod daemon;
 mod lab;
 pub mod media;
-pub mod net;
 mod validate;
 
 use clap::{Parser, Subcommand};
@@ -39,40 +38,15 @@ pub enum Command {
     Status,
     /// Validate the lab file with no side effects
     Validate,
-    /// Start one VM
-    Start { vm: String },
-    /// Stop one VM (graceful ladder; --force to kill)
-    Stop {
-        vm: String,
-        #[arg(long)]
-        force: bool,
-    },
-    /// Restart one VM
-    Restart { vm: String },
-    /// Take a snapshot of one VM, or lab-wide with no VM
-    Snapshot {
-        /// Snapshot name
-        name: String,
-        /// VM ([lab/]vm); omitted = every VM in the lab
-        #[arg(long)]
-        vm: Option<String>,
-    },
-    /// Restore a snapshot (resumes running iff it was taken online)
-    Restore {
-        /// Snapshot name
-        name: String,
-        /// VM ([lab/]vm); omitted = every VM in the lab
-        #[arg(long)]
-        vm: Option<String>,
-    },
-    /// List a VM's snapshots
-    Snapshots { vm: String },
-    /// Delete a VM snapshot
-    SnapshotDelete { vm: String, name: String },
-    /// Inspect and mutate network rules (PRD §9.9)
-    Net {
+    /// Per-VM power control: start / stop / restart
+    Vm {
         #[command(subcommand)]
-        cmd: net::NetCmd,
+        cmd: VmCmd,
+    },
+    /// Take, restore, list, and delete VM/lab snapshots (PRD §7.3)
+    Snapshot {
+        #[command(subcommand)]
+        cmd: SnapshotCmd,
     },
     /// Manage the template store and OCI distribution (PRD §6)
     Template {
@@ -96,7 +70,8 @@ pub enum Command {
         /// Script path, relative to the lab root
         script: String,
     },
-    /// Write the wisp interface file (LSP support for lab scripts)
+    /// Internal: write the wisp interface file (LSP support for lab scripts)
+    #[command(hide = true)]
     Wispi {
         /// Output path
         #[arg(default_value = "vmlab.wispi")]
@@ -152,6 +127,46 @@ pub enum Command {
     },
 }
 
+/// Per-VM power control (PRD §12).
+#[derive(Subcommand)]
+pub enum VmCmd {
+    /// Start one VM
+    Start { vm: String },
+    /// Stop one VM (graceful ladder; --force to kill)
+    Stop {
+        vm: String,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Restart one VM
+    Restart { vm: String },
+}
+
+/// Snapshot management (PRD §7.3).
+#[derive(Subcommand)]
+pub enum SnapshotCmd {
+    /// Take a snapshot of one VM, or lab-wide with no --vm
+    Create {
+        /// Snapshot name
+        name: String,
+        /// VM ([lab/]vm); omitted = every VM in the lab
+        #[arg(long)]
+        vm: Option<String>,
+    },
+    /// Restore a snapshot (resumes running iff it was taken online)
+    Restore {
+        /// Snapshot name
+        name: String,
+        /// VM ([lab/]vm); omitted = every VM in the lab
+        #[arg(long)]
+        vm: Option<String>,
+    },
+    /// List a VM's snapshots
+    List { vm: String },
+    /// Delete a VM snapshot
+    Delete { vm: String, name: String },
+}
+
 pub fn run() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
@@ -160,14 +175,17 @@ pub fn run() -> ExitCode {
         Command::Destroy => lab::cmd_destroy(),
         Command::Status => lab::cmd_status(),
         Command::Validate => validate::cmd_validate().map(|_| ()),
-        Command::Start { vm } => lab::cmd_vm_power(&vm, "start", false),
-        Command::Stop { vm, force } => lab::cmd_vm_power(&vm, "stop", force),
-        Command::Restart { vm } => lab::cmd_vm_power(&vm, "restart", false),
-        Command::Snapshot { name, vm } => lab::cmd_snapshot(vm, name),
-        Command::Restore { name, vm } => lab::cmd_restore(vm, name),
-        Command::Snapshots { vm } => lab::cmd_snapshots(&vm),
-        Command::SnapshotDelete { vm, name } => lab::cmd_snapshot_delete(&vm, name),
-        Command::Net { cmd } => net::cmd_net(cmd),
+        Command::Vm { cmd } => match cmd {
+            VmCmd::Start { vm } => lab::cmd_vm_power(&vm, "start", false),
+            VmCmd::Stop { vm, force } => lab::cmd_vm_power(&vm, "stop", force),
+            VmCmd::Restart { vm } => lab::cmd_vm_power(&vm, "restart", false),
+        },
+        Command::Snapshot { cmd } => match cmd {
+            SnapshotCmd::Create { name, vm } => lab::cmd_snapshot(vm, name),
+            SnapshotCmd::Restore { name, vm } => lab::cmd_restore(vm, name),
+            SnapshotCmd::List { vm } => lab::cmd_snapshots(&vm),
+            SnapshotCmd::Delete { vm, name } => lab::cmd_snapshot_delete(&vm, name),
+        },
         Command::Template { cmd } => crate::template::cli::cmd_template(cmd),
         Command::Media { cmd } => media::cmd_media(cmd),
         Command::Console { vm, tcp } => console::cmd_console(&vm, tcp),
