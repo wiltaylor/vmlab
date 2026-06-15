@@ -62,3 +62,7 @@ lab-down dir='examples/mixed-lab': release
 [group('lab')]
 lab-destroy dir='examples/mixed-lab': release
 	cd {{dir}} && {{justfile_directory()}}/target/release/vmlab destroy
+
+# Launch the winsrv-desktop example (opens the WS2025 guest window)
+[group('lab')]
+winsrv-desktop: (lab-up 'examples/winsrv-desktop')
