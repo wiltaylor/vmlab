@@ -1,0 +1,35 @@
+// Fedora 44 template (PRD §6.1), built from the official Cloud Base image +
+// cloud-init. Fedora has no LTS — this is the current release. The qcow2 is
+// downloaded and sha256-verified into the artefact cache; cloudinit/ is
+// packed into a CIDATA ISO (NoCloud datasource) that creates the vmlab login
+// and installs the QEMU guest agent on first boot. SeaBIOS — cloud images
+// boot BIOS.
+//
+//   vmlab template build        (run from this directory)
+//
+// Version bumps (~every 6 months): update the url, sha256 (from the
+// Fedora-Cloud-NN-x.y-x86_64-CHECKSUM beside the image under
+// https://download.fedoraproject.org/pub/fedora/linux/releases/NN/Cloud/x86_64/images/),
+// and version.
+
+import <vmlab.wcl>
+
+template "fedora-44" {
+  arch     = "x86_64"
+  version  = "44.1.7"
+  profile  = "linux-modern"
+  firmware = "seabios"
+  cpus     = 2
+  memory   = "4G"
+  disk     = "20G"
+
+  source "qcow2" {
+    url    = "https://download.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2"
+    sha256 = "28680fe5b371a5a82ebf43a31926e086a168e59949d03969c5093e7071f90b7f"
+  }
+
+  media { kind = "iso" from = "./cloudinit/" label = "CIDATA" }
+  nic { nat = true }
+
+  provision "scripts/install.wisp" { }
+}

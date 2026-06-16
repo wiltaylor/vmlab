@@ -1,0 +1,35 @@
+// openSUSE Tumbleweed template (PRD §6.1) — the rolling-release counterpart
+// to Leap. Built from the official Minimal-VM cloud image + cloud-init. The
+// qcow2 is downloaded and sha256-verified into the artefact cache; cloudinit/
+// is packed into a CIDATA ISO (NoCloud datasource) that creates the vmlab
+// login and installs the QEMU guest agent on first boot. SeaBIOS — cloud
+// images boot BIOS.
+//
+//   vmlab template build        (run from this directory)
+//
+// Tumbleweed rolls: this pins a dated snapshot. To refresh, pick a newer
+// Cloud-Snapshot image (and its .sha256) from
+// https://download.opensuse.org/tumbleweed/appliances/ and update url,
+// sha256, and version.
+
+import <vmlab.wcl>
+
+template "opensuse-tumbleweed" {
+  arch     = "x86_64"
+  version  = "20260613"
+  profile  = "linux-modern"
+  firmware = "seabios"
+  cpus     = 2
+  memory   = "4G"
+  disk     = "20G"
+
+  source "qcow2" {
+    url    = "https://download.opensuse.org/tumbleweed/appliances/openSUSE-Tumbleweed-Minimal-VM.x86_64-1.0.0-Cloud-Snapshot20260613.qcow2"
+    sha256 = "b32bb52168817e1bb245a25159a3550a3c8fadfc3ca5328ba25e458db69ec2ab"
+  }
+
+  media { kind = "iso" from = "./cloudinit/" label = "CIDATA" }
+  nic { nat = true }
+
+  provision "scripts/install.wisp" { }
+}

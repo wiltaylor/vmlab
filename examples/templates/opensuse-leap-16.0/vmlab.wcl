@@ -1,0 +1,33 @@
+// openSUSE Leap 16.0 template (PRD §6.1), built from the official Minimal-VM
+// cloud image + cloud-init. The qcow2 is downloaded and sha256-verified into
+// the artefact cache; cloudinit/ is packed into a CIDATA ISO (NoCloud
+// datasource) that creates the vmlab login and installs the QEMU guest agent
+// on first boot. SeaBIOS — cloud images boot BIOS.
+//
+//   vmlab template build        (run from this directory)
+//
+// Point-release bumps: update the url, sha256 (from the .sha256 beside the
+// image under https://download.opensuse.org/distribution/leap/16.0/appliances/),
+// and version.
+
+import <vmlab.wcl>
+
+template "opensuse-leap" {
+  arch     = "x86_64"
+  version  = "16.0"
+  profile  = "linux-modern"
+  firmware = "seabios"
+  cpus     = 2
+  memory   = "4G"
+  disk     = "20G"
+
+  source "qcow2" {
+    url    = "https://download.opensuse.org/distribution/leap/16.0/appliances/Leap-16.0-Minimal-VM.x86_64-Cloud-Build18.3.qcow2"
+    sha256 = "81c9a61e9097c1e87bc27ca9f1e83f050145ffd7267d38a96b5e1852dd26731b"
+  }
+
+  media { kind = "iso" from = "./cloudinit/" label = "CIDATA" }
+  nic { nat = true }
+
+  provision "scripts/install.wisp" { }
+}

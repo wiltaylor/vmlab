@@ -1,0 +1,21 @@
+#cloud-config
+# NoCloud seed (picked up from the CIDATA ISO) for the AlmaLinux build VM.
+# Creates the vmlab/vmlab login and installs the QEMU guest agent so lab
+# clones come up "ready". cloud-init disables itself afterwards so clones
+# (which boot without this seed) don't re-run it.
+hostname: almalinux
+users:
+  - name: vmlab
+    lock_passwd: false
+    plain_text_passwd: vmlab
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    shell: /bin/bash
+ssh_pwauth: true
+chpasswd:
+  expire: false
+package_update: true
+packages:
+  - qemu-guest-agent
+runcmd:
+  - [systemctl, enable, --now, qemu-guest-agent.service]
+  - [touch, /etc/cloud/cloud-init.disabled]

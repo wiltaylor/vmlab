@@ -318,4 +318,25 @@ template "base" {
         assert_eq!(t.media.len(), 1);
         assert_eq!(t.provisions.len(), 1);
     }
+
+    /// Every shipped example template's `vmlab.wcl` must parse (keeps the
+    /// examples/templates/ definitions honest, like the wisp script test).
+    #[test]
+    fn shipped_example_templates_parse() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/templates");
+        let mut checked = 0usize;
+        for entry in std::fs::read_dir(root).unwrap() {
+            let dir = entry.unwrap().path();
+            let wcl = dir.join("vmlab.wcl");
+            if !wcl.is_file() {
+                continue;
+            }
+            let src = std::fs::read_to_string(&wcl).unwrap();
+            let tf = load_template_source(&src, "vmlab.wcl", &dir)
+                .unwrap_or_else(|e| panic!("{}: {e:?}", wcl.display()));
+            assert!(!tf.templates.is_empty(), "{}: no templates", wcl.display());
+            checked += 1;
+        }
+        assert!(checked >= 4, "expected example templates, found {checked}");
+    }
 }
