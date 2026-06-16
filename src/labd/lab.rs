@@ -101,11 +101,7 @@ impl LabRuntime {
                 }
             };
 
-            let mut resolved = crate::qemu::resolve_vm(vm_cfg, meta.as_ref(), profiles)?;
-            // Lab-level `gui` is the default for VMs that don't set it.
-            if vm_cfg.gui.is_none() {
-                resolved.gui = config.lab.gui.unwrap_or(false);
-            }
+            let resolved = crate::qemu::resolve_vm(vm_cfg, meta.as_ref(), profiles)?;
 
             // Stable MACs: explicit > persisted > generated (PRD §9.4).
             let vm_state = state.vm_mut(&vm_cfg.name);

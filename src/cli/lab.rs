@@ -65,6 +65,22 @@ pub fn cmd_up(vms: Vec<String>) -> Result<()> {
             .await
             .map_err(remote)?;
         println!("lab \"{name}\" is up");
+
+        // `gui = true` VMs get a detached VNC viewer opened from this
+        // interactive session (the daemon is headless and can't reach the
+        // user's display). Closing the viewer only disconnects; the VM
+        // keeps running (§11). Done CLI-side so VMs always boot headless.
+        let file = crate::config::load_lab_root(&root)
+            .map_err(|e| anyhow!("{:?}", miette::Report::new(e)))?;
+        let lab_gui = file.lab.gui.unwrap_or(false);
+        for vm in &file.lab.vms {
+            if !vm.gui.unwrap_or(lab_gui) {
+                continue;
+            }
+            if vms.is_empty() || vms.iter().any(|v| v == &vm.name) {
+                crate::viewer::open_for(&name, &vm.name)?;
+            }
+        }
         Ok(())
     })
 }

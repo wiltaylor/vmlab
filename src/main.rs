@@ -18,6 +18,7 @@ mod scripting;
 mod smb;
 mod supervisor;
 mod template;
+mod viewer;
 mod vision;
 
 fn main() -> std::process::ExitCode {

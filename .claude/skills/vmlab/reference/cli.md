@@ -16,9 +16,9 @@ vmlab status                   # lab/VM/segment state, IPs, ready flags
 ## Per-VM power
 
 ```sh
-vmlab start <vm>
-vmlab stop <vm> [--force]
-vmlab restart <vm>
+vmlab vm start <vm>
+vmlab vm stop <vm> [--force]
+vmlab vm restart <vm>
 ```
 
 ## Snapshots
@@ -27,18 +27,17 @@ Online (VM running: disk+RAM+device state) or offline (powered off: disk
 only) per current power state. Restoring an online snapshot resumes running.
 
 ```sh
-vmlab snapshot <name> [--vm <vm>]    # omit --vm = every VM in the lab (best-effort, not coordinated)
-vmlab restore <name> [--vm <vm>]
-vmlab snapshots <vm>                 # list (name, taken_at, power_state)
-vmlab snapshot-delete <vm> <name>
+vmlab snapshot create <name> [--vm <vm>]   # omit --vm = every VM in the lab (best-effort, not coordinated)
+vmlab snapshot restore <name> [--vm <vm>]
+vmlab snapshot list <vm>                    # (name, taken_at, power_state)
+vmlab snapshot delete <vm> <name>
 ```
 
 ## Guest execution & scripting
 
 ```sh
 vmlab exec <vm> -- <cmd> [args...]   # run via guest agent, prints stdout/stderr
-vmlab run <script.wisp>              # ad-hoc wisp script against the running lab (fn main(lab: Lab))
-vmlab wispi [out]                    # write wisp interface file for LSP (default vmlab.wispi)
+vmlab script <script.wisp>           # ad-hoc wisp script against the running lab (fn main(lab: Lab))
 ```
 
 ## Console & logs
@@ -51,14 +50,10 @@ vmlab logs -f               # follow
 vmlab logs -n 50            # lines of history (default 100)
 ```
 
-## Runtime network rules (lab must be running)
-
-```sh
-vmlab net rules                                      # list L3 rules across segments
-vmlab net block <segment> <cidr>                     # drop traffic to CIDR/IP
-vmlab net redirect <segment> <from> <to>             # DNAT ip[:port] -> ip[:port]
-vmlab net forward <segment> <host_port> <vm> <guest_port>   # host → guest port forward (TCP)
-```
+Networking (segments, forwards, routes, filtering/redirection) is
+declarative in `vmlab.wcl`; there is no `vmlab net` CLI. Runtime rule
+mutation is available from wisp scripts via the `Segment` API (see
+wisp-api.md).
 
 ## Templates (store + builds)
 
@@ -79,12 +74,8 @@ vmlab template push <arch>/<name>[@<ver>] <registry>/<repo>:<tag>
 vmlab template pull <registry>/<repo>:<tag> [--arch <arch>]   # --arch required for multi-arch indexes
 ```
 
-## Media
-
-```sh
-vmlab media build iso <folder> <out.iso> [-l <label>]
-vmlab media build floppy <folder> <out.img> [-l <label>]
-```
+Media (ISO/floppy from a folder) is declared inline with `media {}` blocks
+in VM/template definitions — there is no `vmlab media` CLI.
 
 ## Daemon (normally automatic)
 
@@ -94,5 +85,5 @@ vmlab daemon stop     # stop supervisor and all lab daemons
 vmlab daemon status   # supervisor version + running labs (name/state/pid/root)
 ```
 
-Source of truth: PRD §12; `src/cli/mod.rs`, `src/cli/net.rs`,
-`src/template/cli.rs`, `src/cli/media.rs`, `src/cli/daemon.rs`.
+Source of truth: PRD §12; `src/cli/mod.rs`, `src/template/cli.rs`,
+`src/cli/daemon.rs`.

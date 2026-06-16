@@ -3,7 +3,7 @@
 The smallest useful lab: one Windows Server 2025 VM on a NAT'd segment,
 with its display surfaced on the host so you can drive the desktop by hand.
 It exercises vmlab's console access (PRD §11) — `gui = true` to auto-open
-QEMU's window, or `vmlab console` to attach a viewer on demand.
+a viewer, or `vmlab console` to attach one on demand.
 
 Prerequisite — build the template first:
 
@@ -15,9 +15,9 @@ Run it:
 
 ```sh
 vmlab validate
-vmlab up                # boots winsrv; with gui = true its window opens
+vmlab up                # boots winsrv headless; with gui = true a viewer opens
 vmlab status            # winsrv ready at 10.80.0.10
-vmlab console winsrv    # or attach a VNC viewer yourself, any time
+vmlab console winsrv    # reattach a viewer any time (closing it just disconnects)
 vmlab down              # clone retained; `vmlab destroy` deletes it
 ```
 
@@ -25,13 +25,18 @@ Guest credentials: `Administrator` / `vmlab123!`.
 
 ## Showing the UI
 
-`gui = true` (set on the lab, inherited by every VM) makes `vmlab up`
-open QEMU's own display window per guest, so the Server 2025 desktop
-renders live on the host. Drop it to `false` on a VM to keep that one
-headless while still reachable.
+Every VM always runs **headless**, serving a VNC display on a unix
+socket. `gui = true` (set on the lab, inherited by every VM) just makes
+`vmlab up` launch a VNC **viewer** against that socket per guest. Because
+the viewer is a separate process, closing its window only disconnects —
+the VM keeps running, and `vmlab console winsrv` reattaches. Drop `gui`
+to `false` on a VM to skip the auto-opened viewer for that one.
 
-Even when headless, every VM always serves a VNC display on a unix
-socket — `vmlab console winsrv` launches your configured viewer against
-it. On WSL2 (where the viewer lives on the Windows side) it bridges the
-socket to a localhost TCP port and prints the address; add `--tcp` to
-force that path anywhere.
+vmlab finds a viewer automatically — a `viewer` in host config, else
+`remote-viewer` / `gvncviewer` / `vncviewer` on `PATH`. `remote-viewer`
+(virt-viewer) dials the VNC unix socket directly; `gvncviewer`/`vncviewer`
+are TCP-only, so vmlab bridges the socket for them. Either way neither
+`vmlab up` nor `vmlab console` blocks your terminal — a TCP viewer's
+bridge runs in a detached helper that exits when you close the window.
+On WSL2 (viewer on the Windows side) `vmlab console --tcp` bridges to a
+localhost port to attach a Windows client.

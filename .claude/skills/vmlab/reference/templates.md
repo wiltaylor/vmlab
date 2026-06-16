@@ -74,16 +74,12 @@ disk. Requires explicit `arch`, `profile`, and `disk` size; boot media is
 your problem (typically `cdrom` + a `media` block). Scratch never appears
 in the store and cannot be pushed/pulled.
 
-## Standalone media building
+## Media building
 
 Folder → ISO/floppy with a content-addressed cache (rebuilt only when the
-folder changes). Declarative `media {}` blocks in VM/template definitions
-do the same thing automatically.
-
-```sh
-vmlab media build iso ./drivers/ out.iso -l DRIVERS
-vmlab media build floppy ./unattend/ unattend.img
-```
+folder changes), declared inline with `media {}` blocks in VM/template
+definitions (`media { kind = "iso" from = "./unattend/" label = "CIDATA" }`).
+There is no `vmlab media` CLI — media is declarative.
 
 Source of truth: PRD §6; `src/config/schema.wcl` (TemplateDef,
 TemplateSource), `src/template/build.rs`, `src/template/cli.rs`.

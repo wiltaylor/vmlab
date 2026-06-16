@@ -1,5 +1,5 @@
 //! Script execution: provision scripts (`fn main(lab: Lab)`), event
-//! handlers (`fn handle(event: Event, lab: Lab)`), and ad-hoc `vmlab run`.
+//! handlers (`fn handle(event: Event, lab: Lab)`), and ad-hoc `vmlab script`.
 //! The wisp VM is synchronous — scripts run on blocking threads; host
 //! methods bridge back into tokio via the runtime handle carried in each
 //! script object.

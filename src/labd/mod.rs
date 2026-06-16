@@ -176,7 +176,7 @@ impl Handler for LabdHandler {
                 lab.up(&vms_arg(&args), output).await.map_err(err)?;
                 Ok(json!(true))
             }
-            // Ad-hoc script against the lab (PRD §12: vmlab run).
+            // Ad-hoc script against the lab (PRD §12: vmlab script).
             "run" => {
                 let script = args["script"].as_str().ok_or("missing script")?;
                 let path = lab.root.join(script);

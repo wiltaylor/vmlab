@@ -229,7 +229,7 @@ Build flow: create working qcow2 → boot per template hardware → run build pr
 
 ### 6.3 Media building
 
-`vmlab` can build **ISO and floppy images from folders on disk**, both as a CLI verb and inline in template/VM blocks (`media { type = "iso" from = "./unattend/" }`). Built images land in `.vmlab/` and are content-addressed so unchanged folders don't rebuild. Primary use: unattend/answer files, driver bundles, agent installers, payload delivery to guests with no network.
+`vmlab` can build **ISO and floppy images from folders on disk**, declared inline in template/VM blocks (`media { type = "iso" from = "./unattend/" }`). Built images land in `.vmlab/` and are content-addressed so unchanged folders don't rebuild. Primary use: unattend/answer files, driver bundles, agent installers, payload delivery to guests with no network.
 
 ### 6.4 OCI registry distribution
 
@@ -500,7 +500,7 @@ All blocking calls take timeouts and return wisp `Result`s; an error propagating
 ### 10.4 Execution model
 
 - Provision scripts listed in `vmlab.wcl` run in declaration order during `up`, after the VMs they reference are started per `depends_on`. A script orchestrating multiple VMs (stand up DC → wait → join member) is the expected normal case.
-- Any script is also invocable ad hoc: `vmlab run scripts/whatever.wisp`.
+- Any script is also invocable ad hoc: `vmlab script scripts/whatever.wisp`.
 - Event handlers receive `(event: Value, lab)` — the one dynamic escape hatch, consistent with Config Weave's boundary model.
 - Template build scripts get the same API scoped to the single build VM (a lab handle containing one VM).
 
@@ -509,6 +509,10 @@ All blocking calls take timeouts and return wisp `Result`s; an error propagating
 ## 11. Console access
 
 Every VM gets a VNC display served on a unix socket (TCP optional, off by default). `vmlab console [lab/]vm` connects — launching a configured viewer, with a TCP-forward fallback for environments (WSL2) where the viewer lives on the Windows side. SPICE is explicitly deferred. VMs are headless by default in the sense that nothing attaches unless asked; the display always exists so screenshots and console attach work at any moment.
+
+`gui = true` (per VM, or as a lab-wide default) is a convenience that auto-opens a viewer on `vmlab up` — and watches the build VM during `vmlab template build`. It is **never** QEMU's own GTK window: the VM always runs headless behind VNC, so the viewer is a separate client process and closing its window only disconnects (the VM keeps running; `vmlab console` reattaches). The viewer is launched from the interactive CLI, not the headless lab daemon.
+
+The viewer is chosen automatically: an explicit `viewer` in host config wins, else the first of `remote-viewer` (virt-viewer), `gvncviewer`, `vncviewer` found on `PATH`. `remote-viewer` dials the VNC unix socket directly; the others are TCP-only, so vmlab bridges the socket to a localhost display port for them. Neither `vmlab console` nor the `gui = true` auto-open ties up the terminal: a TCP viewer's bridge runs in a detached helper (`vmlab __vncbridge`, in its own session) that exits when the viewer window closes. With no viewer at all, `vmlab console` falls back to bridging and printing the address to attach to manually (the WSL2 path, also forced with `--tcp`).
 
 ---
 
@@ -527,11 +531,10 @@ Every VM gets a VNC display served on a unix socket (TCP optional, off by defaul
 | `vmlab exec [--timeout s] <vm> -- cmd` | Guest-agent exec |
 | `vmlab cp <src> <vm>:<dest>` | Copy a host file/tree into a guest via the agent |
 | `vmlab osinfo <vm>` | Guest OS identification as JSON |
-| `vmlab run <script.wisp>` | Ad-hoc script against the current lab |
+| `vmlab script <script.wisp>` | Ad-hoc script against the current lab |
 | `vmlab logs [lab/][vm]` | Tail/dump JSON-line logs |
 | `vmlab template build / list / rm / export / import` | Template store |
 | `vmlab template push / pull / login` | OCI registry distribution (§6.4) |
-| `vmlab media build` | Folder → ISO/floppy |
 | `vmlab daemon start / stop / status` | Supervisor control (normally automatic); status lists lab daemons |
 
 ---
@@ -549,7 +552,7 @@ vmlab ships an official Docker/OCI **runtime image** (distinct from template art
 - **Acceleration.** With `--device /dev/kvm` the container runs KVM-accelerated like a native install. Without it, vmlab falls back to TCG with a loud warning — slow but functional, which matters for environments without KVM exposure.
 - **Privileges.** Because the network fabric is userspace, the container needs **no** `--privileged`, no extra capabilities, and no host network mode — `/dev/kvm` is the only host grant.
 - **State.** Documented volume mounts for the template store (`~/.local/share/vmlab/templates`) and the lab directory; everything else is container-ephemeral by design. Host access to guests rides vmlab port-forwards mapped out with ordinary `-p` flags.
-- **Entrypoint.** Defaults to the supervisor in the foreground (lab daemons are its children); `docker exec` (or a second container sharing the socket volume) drives the CLI. A one-shot mode (`vmlab up && vmlab run ...` then exit) suits CI.
+- **Entrypoint.** Defaults to the supervisor in the foreground (lab daemons are its children); `docker exec` (or a second container sharing the socket volume) drives the CLI. A one-shot mode (`vmlab up && vmlab script ...` then exit) suits CI.
 - **Primary use cases:** CI pipelines running full lab tests, trying vmlab without installing QEMU, and pinning a known-good QEMU version independent of the host distro.
 
 ---

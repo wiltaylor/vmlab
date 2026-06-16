@@ -76,19 +76,16 @@ Worked examples under `examples/`, all built and run end-to-end:
 | `vmlab destroy` | Stop + delete clones, lab-local state, dynamic net config |
 | `vmlab status` | Lab/VM/segment state, IPs, ready flags |
 | `vmlab validate` | Full validation, no side effects |
-| `vmlab start / stop / restart <vm>` | Per-VM power operations |
-| `vmlab snapshot / restore / snapshots / snapshot-delete` | Snapshots |
+| `vmlab vm start / stop / restart <vm>` | Per-VM power operations |
+| `vmlab snapshot create / restore / list / delete` | Per-VM or lab-wide snapshots |
 | `vmlab console <vm>` | Attach a VNC viewer (TCP-forward fallback for WSL2) |
 | `vmlab exec [--timeout s] <vm> -- cmd` | Guest-agent exec |
 | `vmlab cp <src> <vm>:<dest>` | Copy a host file or directory tree into a guest |
 | `vmlab osinfo <vm>` | Guest OS identification (guest-get-osinfo) as JSON |
-| `vmlab run <script.wisp>` | Ad-hoc script against the current lab |
-| `vmlab wispi` | Write the wisp interface file for LSP support |
+| `vmlab script <script.wisp>` | Ad-hoc script against the current lab |
 | `vmlab logs [lab/][vm]` | Tail/dump JSON-line logs |
-| `vmlab net rules / block / redirect / forward` | Inspect + mutate network rules |
 | `vmlab template build / list / rm / export / import` | Template store |
 | `vmlab template push / pull / login` | OCI registry distribution |
-| `vmlab media build` | Folder → ISO/floppy |
 | `vmlab daemon start / stop / status` | Supervisor control (normally automatic) |
 
 ## Building

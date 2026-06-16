@@ -32,7 +32,7 @@ pub struct TemplateFile {
 pub struct Lab {
     pub name: String,
     pub span: Span,
-    /// Default for all VMs: open QEMU's own display window (§11).
+    /// Default for all VMs: open a VNC viewer on `up` (§11).
     pub gui: Option<bool>,
     pub segments: Vec<Segment>,
     pub vms: Vec<Vm>,
@@ -204,7 +204,7 @@ pub struct Vm {
     pub floppy: Option<PathBuf>,
     pub depends_on: Vec<String>,
     pub nested: bool,
-    /// Open QEMU's own display window (§11); None = inherit the lab default.
+    /// Open a VNC viewer on `up` (§11); None = inherit the lab default.
     pub gui: Option<bool>,
     pub display: Option<String>,
     pub firmware: Option<Firmware>,

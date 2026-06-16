@@ -48,7 +48,7 @@ image tag='vmlab:latest':
 install:
 	cargo install --path . --locked
 
-# Bring a lab up (guest windows open when the lab sets `gui = true`)
+# Bring a lab up (a VNC viewer opens per VM when the lab sets `gui = true`)
 [group('lab')]
 lab-up dir='examples/mixed-lab': release
 	cd {{dir}} && {{justfile_directory()}}/target/release/vmlab up

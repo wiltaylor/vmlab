@@ -4,7 +4,6 @@
 pub mod console;
 pub mod daemon;
 mod lab;
-pub mod media;
 mod validate;
 
 use clap::{Parser, Subcommand};
@@ -53,11 +52,6 @@ pub enum Command {
         #[command(subcommand)]
         cmd: crate::template::cli::TemplateCmd,
     },
-    /// Build an ISO or floppy image from a folder (PRD §6.3)
-    Media {
-        #[command(subcommand)]
-        cmd: media::MediaCmd,
-    },
     /// Attach a console viewer to a VM (PRD §11)
     Console {
         vm: String,
@@ -66,7 +60,7 @@ pub enum Command {
         tcp: bool,
     },
     /// Run an ad-hoc wisp script against the current lab
-    Run {
+    Script {
         /// Script path, relative to the lab root
         script: String,
     },
@@ -111,6 +105,14 @@ pub enum Command {
     Daemon {
         #[command(subcommand)]
         cmd: daemon::DaemonCmd,
+    },
+    /// Internal: hold a backgrounded console's VNC bridge + viewer
+    #[command(name = "__vncbridge", hide = true)]
+    Vncbridge {
+        #[arg(long)]
+        lab: String,
+        #[arg(long)]
+        vm: String,
     },
     /// Internal: run the supervisor daemon in the foreground
     #[command(name = "__supervisord", hide = true)]
@@ -187,9 +189,9 @@ pub fn run() -> ExitCode {
             SnapshotCmd::Delete { vm, name } => lab::cmd_snapshot_delete(&vm, name),
         },
         Command::Template { cmd } => crate::template::cli::cmd_template(cmd),
-        Command::Media { cmd } => media::cmd_media(cmd),
         Command::Console { vm, tcp } => console::cmd_console(&vm, tcp),
-        Command::Run { script } => lab::cmd_run(&script),
+        Command::Vncbridge { lab, vm } => console::run_bridge(lab, vm),
+        Command::Script { script } => lab::cmd_run(&script),
         Command::Wispi { out } => crate::scripting::write_interface(&out)
             .map_err(anyhow::Error::from)
             .map(|()| println!("wrote {}", out.display())),

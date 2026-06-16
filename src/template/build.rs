@@ -147,6 +147,11 @@ async fn run_build(
 
     // Boot + run build provision scripts (PRD §6.1, §10.4).
     log("booting build VM\n".to_string());
+    // `gui = true` builds get a viewer once QEMU creates the VNC socket;
+    // up() below blocks through provisioning, so this watches concurrently.
+    if def.gui {
+        crate::viewer::open_when_ready(vm.dirs.vnc_sock());
+    }
     runtime
         .up(&[], log.clone())
         .await

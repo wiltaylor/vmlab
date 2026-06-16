@@ -87,12 +87,12 @@ pub fn build_args(
     arg(&mut a, "smp", vm.cpus.to_string());
     arg(&mut a, "m", format!("{}M", vm.memory >> 20));
 
-    // Headless by default, with a VNC display always available (§11).
-    // `gui = true` opens QEMU's own GTK window as well — unless the
-    // environment has no display server to put it on. Closing the window
-    // kills the VM (QEMU semantics), surfacing as vm.crashed.
-    let ui = display_backend(vm.gui, host_has_display());
-    arg(&mut a, "display", ui.into());
+    // Always headless, with a VNC display on a unix socket (§11). A
+    // `gui = true` window is a *separate* VNC viewer the CLI launches on
+    // `up` (see cli::console) — never QEMU's own GTK window, whose close
+    // would quit QEMU and kill the VM. Decoupling the window from the VM
+    // lets the user close the viewer and reattach with `vmlab console`.
+    arg(&mut a, "display", "none".into());
     arg(&mut a, "vnc", format!("unix:{}", paths.vnc_sock.display()));
 
     arg(
@@ -296,23 +296,6 @@ pub fn build_args(
 }
 
 /// Whether this process can put a window on screen.
-fn host_has_display() -> bool {
-    std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some()
-}
-
-/// QEMU `-display` backend: GTK only when requested AND there is somewhere
-/// to show it — a `gui = true` lab must still come up on a headless host.
-fn display_backend(gui_requested: bool, has_display: bool) -> &'static str {
-    if gui_requested && has_display {
-        "gtk"
-    } else {
-        if gui_requested {
-            tracing::warn!("gui requested but no display server found — running headless");
-        }
-        "none"
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,7 +307,6 @@ mod tests {
         ResolvedVm {
             name: "t".into(),
             profile: Some(profile.into()),
-            gui: false,
             arch: arch.into(),
             cpus: 2,
             memory: 2 << 30,
@@ -446,13 +428,17 @@ mod tests {
         assert!(s.contains("if=floppy,format=raw,file=/lab/.vmlab/media/drivers.img"));
     }
 
-    /// `gui = true` opens GTK only when a display server exists; a
-    /// headless host must still boot the VM (VNC stays available).
+    /// QEMU is always headless with VNC on a socket; a `gui = true` window
+    /// is a separate viewer the CLI launches (§11), never QEMU's own GTK.
     #[test]
-    fn gui_falls_back_headless_without_display() {
-        assert_eq!(display_backend(true, true), "gtk");
-        assert_eq!(display_backend(true, false), "none");
-        assert_eq!(display_backend(false, true), "none");
+    fn always_headless_with_vnc() {
+        let vm = resolved("linux-modern", "x86_64");
+        let mut p = paths();
+        p.ovmf_vars = Some("/v".into());
+        let s = joined(&build_args("l", &vm, &p, Accel::Kvm).unwrap());
+        assert!(s.contains("-display none"), "{s}");
+        assert!(!s.contains("gtk"), "{s}");
+        assert!(s.contains("-vnc unix:"), "{s}");
     }
 
     /// Two CD-ROMs on q35 must land on distinct AHCI ports (a port holds a

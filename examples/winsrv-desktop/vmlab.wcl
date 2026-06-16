@@ -2,21 +2,22 @@
 // you actually watch. Built on examples/templates/windows-server-2025
 // (build that first). The point here is the display surface (PRD §11):
 //
-//   gui = true     opens QEMU's own window for the guest on `vmlab up`,
-//                  so the Server 2025 desktop renders live on the host.
+//   gui = true     opens a VNC viewer for the guest on `vmlab up`. The VM
+//                  itself always runs headless, so closing the viewer just
+//                  disconnects — the desktop keeps running.
 //
-//   vmlab console winsrv      attach a VNC viewer at any time instead
-//                             (works headless; also the WSL2 path).
+//   vmlab console winsrv      attach a viewer at any time (also the WSL2
+//                             TCP-bridge path with --tcp).
 //
 //   vmlab up
-//   vmlab console winsrv      # if you didn't want the auto-opened window
+//   vmlab console winsrv      # reattach after closing the window
 //   vmlab down
 
 import <vmlab.wcl>
 
 lab "winsrv-desktop" {
 
-  gui = true        // open each guest's screen in a QEMU window on `vmlab up`
+  gui = true        // open a VNC viewer for each guest on `vmlab up`
 
   segment "lan" {
     subnet = "10.80.0.0/24"
