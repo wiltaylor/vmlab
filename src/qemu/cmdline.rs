@@ -93,14 +93,19 @@ pub fn build_args(
     // would quit QEMU and kill the VM. Decoupling the window from the VM
     // lets the user close the viewer and reattach with `vmlab console`.
     arg(&mut a, "display", "none".into());
-    // share=force-shared so several clients coexist: a human viewer
+    // share=ignore so several clients coexist: a human viewer
     // (`vmlab console`), screenshots, and the VNC input transport (§10.3)
-    // can all attach at once. QEMU's default (allow-exclusive) lets a viewer
-    // that connects non-shared kick the others.
+    // can all attach at once, and none can kick the others. QEMU's default
+    // (allow-exclusive) lets a non-shared viewer drop everyone else;
+    // force-shared swings the other way and *drops* any client that asks
+    // for exclusive — which gtk-vnc viewers (gvncviewer/remote-viewer) do by
+    // default, so they'd connect and immediately get disconnected ("waiting
+    // for display…"). `ignore` simply ignores the shared flag and keeps
+    // every client attached.
     arg(
         &mut a,
         "vnc",
-        format!("unix:{},share=force-shared", paths.vnc_sock.display()),
+        format!("unix:{},share=ignore", paths.vnc_sock.display()),
     );
 
     arg(
