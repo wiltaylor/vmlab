@@ -105,7 +105,10 @@ pub fn resolve_vm(
         .firmware
         .map(firmware_kind)
         .or_else(|| template.and_then(|t| t.firmware.as_deref().and_then(meta_firmware)))
-        .or(profile.firmware);
+        .or(profile.firmware)
+        // The `virt` machine (non-x86) has no SeaBIOS fallback, so a guest
+        // that named no firmware would be unbootable — default it to UEFI.
+        .or_else(|| (arch != "x86_64").then_some(FirmwareKind::Ovmf));
 
     let display_device = lab_vm
         .display

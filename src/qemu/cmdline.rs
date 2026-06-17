@@ -187,11 +187,15 @@ pub fn build_args(
         add_disk(&mut a, path, vm.disk_bus);
     }
 
-    // CD-ROMs ride IDE/SATA on every profile — universally bootable. q35's
-    // AHCI ports hold a single unit each and QEMU's auto-placement does not
-    // advance past the first port, so address ports explicitly there,
-    // skipping any ports the IDE/SATA disks above already claimed. Legacy
-    // `pc` IDE buses take two units and auto-place fine.
+    // CD-ROMs. The `virt` machine (aarch64 et al.) has no IDE/AHCI bus at
+    // all, so attach ISOs as read-only virtio-blk there — cloud-init's
+    // NoCloud datasource finds the CIDATA seed by filesystem label on any
+    // block device, regardless of bus. On x86 they ride IDE/SATA, which is
+    // universally bootable. q35's AHCI ports hold a single unit each and
+    // QEMU's auto-placement does not advance past the first port, so address
+    // ports explicitly there, skipping any ports the IDE/SATA disks above
+    // already claimed. Legacy `pc` IDE buses take two units and auto-place.
+    let virt = vm.machine.starts_with("virt");
     let sata_disks = match vm.disk_bus {
         DiskBus::Virtio => 0,
         DiskBus::Ide | DiskBus::Sata => disk_index,
@@ -204,7 +208,9 @@ pub fn build_args(
             iso.display()
         ));
         a.push("-device".into());
-        if ahci {
+        if virt {
+            a.push(format!("virtio-blk-pci,drive=cd{i}"));
+        } else if ahci {
             a.push(format!("ide-cd,drive=cd{i},bus=ide.{}", sata_disks + i));
         } else {
             a.push(format!("ide-cd,drive=cd{i}"));
@@ -290,7 +296,14 @@ pub fn build_args(
     }
 
     // USB tablet: absolute pointer events for screen automation (§10.3).
-    a.push("-usb".into());
+    // The `virt` machine has no default USB host controller, so `-usb` is a
+    // no-op there and usb-tablet has nothing to plug into — add an explicit
+    // xHCI controller. x86 q35/pc have a default controller via `-usb`.
+    if virt {
+        arg(&mut a, "device", "qemu-xhci".into());
+    } else {
+        a.push("-usb".into());
+    }
     arg(&mut a, "device", "usb-tablet".into());
 
     // Don't start the guest CPU until the daemon says go — lets the switch
@@ -448,6 +461,33 @@ mod tests {
         assert!(s.contains("-display none"), "{s}");
         assert!(!s.contains("gtk"), "{s}");
         assert!(s.contains("-vnc unix:"), "{s}");
+    }
+
+    /// The aarch64 `virt` machine has no IDE/AHCI or default USB controller,
+    /// so CD-ROMs ride virtio-blk, USB needs an explicit xHCI, and UEFI is
+    /// mandatory (no SeaBIOS fallback). swtpm uses the MMIO tpm-tis-device.
+    #[test]
+    fn aarch64_virt_shape() {
+        let mut vm = resolved("linux-modern", "aarch64");
+        vm.tpm = true;
+        let mut p = paths();
+        p.ovmf_vars = Some("/lab/.vmlab/t/AAVMF_VARS.fd".into());
+        p.tpm_sock = Some("/run/l/t/tpm.sock".into());
+        p.cdroms = vec!["/lab/.vmlab/media/cidata.iso".into()];
+        let s = joined(&build_args("lab1", &vm, &p, Accel::Tcg).unwrap());
+        assert!(s.contains("-machine virt"), "{s}");
+        assert!(s.contains("if=pflash,format=raw,readonly=on"), "UEFI: {s}");
+        assert!(
+            s.contains("virtio-blk-pci,drive=cd0"),
+            "CD-ROM must ride virtio on virt: {s}"
+        );
+        assert!(!s.contains("ide-cd"), "no IDE on virt: {s}");
+        assert!(s.contains("qemu-xhci"), "explicit USB controller: {s}");
+        assert!(!s.contains("-usb "), "no bare -usb on virt: {s}");
+        assert!(s.contains("usb-tablet"), "{s}");
+        assert!(s.contains("virtio-gpu-pci"), "{s}");
+        assert!(s.contains("tpm-tis-device,tpmdev=tpm0"), "{s}");
+        assert!(s.contains("virtio-blk-pci,drive=disk0"), "{s}");
     }
 
     /// Two CD-ROMs on q35 must land on distinct AHCI ports (a port holds a
