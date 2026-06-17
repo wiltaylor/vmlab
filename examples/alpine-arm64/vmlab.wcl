@@ -1,0 +1,34 @@
+// Minimal arm64 (aarch64) lab: one Alpine guest on a NAT'd segment, with a
+// host port-forward to its SSH port. The guest emulates aarch64 under TCG
+// on x86 hosts (no KVM), so boot is slow — give it a couple of minutes.
+//
+// Build the template first (from the vmlab-templates repo):
+//
+//   cd vmlab-templates/alpine-3.23-arm64 && vmlab template build
+//
+// Then, from this directory:
+//
+//   vmlab up
+//   ssh vmlab@localhost -p 12222      # password: vmlab
+//   vmlab down
+
+import <vmlab.wcl>
+
+lab "alpine-arm64" {
+
+  gui = true        // open a VNC viewer on `up` (virtio-gpu framebuffer)
+
+  segment "lan" {
+    subnet = "10.80.0.0/24"
+    nat    = true                                  // apk needs egress
+    forward { host_port = 12222 to = "alp:22" }    // host SSH → guest 22
+  }
+
+  vm "alp" {
+    template = "aarch64/alpine-3.23"
+    memory   = "1G"
+    nic { segment = "lan" }                        // dynamic DHCP lease
+  }
+
+  provision "scripts/setup.wisp" { }
+}
