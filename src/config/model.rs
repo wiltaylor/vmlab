@@ -397,6 +397,8 @@ pub const EVENT_NAMES: &[&str] = &[
 /// Architectures with a `qemu-system-<arch>` emulator vmlab will drive.
 pub const KNOWN_ARCHES: &[&str] = &[
     "x86_64",
+    // Display-only alias for 32-bit x86 guests; runs on the x86_64 emulator.
+    "x86",
     "aarch64",
     "riscv64",
     "loongarch64",

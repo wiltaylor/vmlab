@@ -42,12 +42,20 @@ pub enum Accel {
     Tcg,
 }
 
+/// The QEMU system emulator arch for a template arch. `x86` (32-bit Windows
+/// and friends) is a display-only alias: it runs on the x86_64 emulator/machine
+/// (a 64-bit QEMU runs 32-bit guests), so it shows as `x86` in the store/list
+/// but behaves like x86_64 everywhere below.
+pub fn qemu_arch(arch: &str) -> &str {
+    if arch == "x86" { "x86_64" } else { arch }
+}
+
 /// Pick the accelerator: KVM when /dev/kvm is usable and the target arch is
 /// the host arch; TCG otherwise — slow but functional, warn loudly (PRD §14).
 pub fn pick_accel(arch: &str) -> Accel {
     let host = std::env::consts::ARCH;
     let kvm = Path::new("/dev/kvm").exists();
-    if kvm && arch == host {
+    if kvm && qemu_arch(arch) == host {
         Accel::Kvm
     } else {
         Accel::Tcg
@@ -55,7 +63,7 @@ pub fn pick_accel(arch: &str) -> Accel {
 }
 
 pub fn emulator_binary(arch: &str) -> String {
-    format!("qemu-system-{arch}")
+    format!("qemu-system-{}", qemu_arch(arch))
 }
 
 /// Build the full argv (excluding argv[0], which is `emulator_binary`).
@@ -122,7 +130,7 @@ pub fn build_args(
 
     // UEFI firmware: CODE read-only pflash + per-VM writable VARS.
     if vm.firmware == Some(FirmwareKind::Ovmf) {
-        let fw = match vm.arch.as_str() {
+        let fw = match qemu_arch(vm.arch.as_str()) {
             "x86_64" => firmware::ovmf_x86_64(vm.secure_boot)?,
             "aarch64" => firmware::uefi_aarch64()?,
             "riscv64" => firmware::uefi_riscv64()?,
@@ -145,7 +153,7 @@ pub fn build_args(
             "drive",
             format!("if=pflash,format=raw,file={}", vars.display()),
         );
-        if vm.secure_boot && vm.arch == "x86_64" {
+        if vm.secure_boot && qemu_arch(vm.arch.as_str()) == "x86_64" {
             // SMM is required for the secboot build to enforce anything.
             a.push("-global".into());
             a.push("driver=cfi.pflash01,property=secure,value=on".into());
@@ -173,6 +181,12 @@ pub fn build_args(
 
     // Primary + extra disks: explicit blockdev node names (disk0, disk1, …)
     // so QMP snapshot commands can address them (§7.3).
+    // SeaBIOS honours an explicit boot order; OVMF/UEFI boots removable media
+    // on its own. Without it, SeaBIOS tries the (blank) disk and any floppy
+    // before the install CD and stalls. So under SeaBIOS we give CD-ROMs the
+    // lowest bootindex (install media boots first), disks the next, and leave
+    // the answer-file floppy unindexed (never a boot candidate).
+    let seabios = vm.firmware != Some(FirmwareKind::Ovmf);
     let mut disk_index = 0usize;
     let mut add_disk = |a: &mut Vec<String>, path: &Path, bus: DiskBus| {
         let node = format!("disk{disk_index}");
@@ -182,9 +196,14 @@ pub fn build_args(
             path.display()
         ));
         a.push("-device".into());
+        let boot = if seabios {
+            format!(",bootindex={}", 50 + disk_index)
+        } else {
+            String::new()
+        };
         match bus {
-            DiskBus::Virtio => a.push(format!("virtio-blk-pci,drive={node}")),
-            DiskBus::Ide | DiskBus::Sata => a.push(format!("ide-hd,drive={node}")),
+            DiskBus::Virtio => a.push(format!("virtio-blk-pci,drive={node}{boot}")),
+            DiskBus::Ide | DiskBus::Sata => a.push(format!("ide-hd,drive={node}{boot}")),
         }
         disk_index += 1;
     };
@@ -214,12 +233,20 @@ pub fn build_args(
             iso.display()
         ));
         a.push("-device".into());
-        if virt {
-            a.push(format!("virtio-blk-pci,drive=cd{i}"));
-        } else if ahci {
-            a.push(format!("ide-cd,drive=cd{i},bus=ide.{}", sata_disks + i));
+        let boot = if seabios {
+            format!(",bootindex={i}")
         } else {
-            a.push(format!("ide-cd,drive=cd{i}"));
+            String::new()
+        };
+        if virt {
+            a.push(format!("virtio-blk-pci,drive=cd{i}{boot}"));
+        } else if ahci {
+            a.push(format!(
+                "ide-cd,drive=cd{i},bus=ide.{}{boot}",
+                sata_disks + i
+            ));
+        } else {
+            a.push(format!("ide-cd,drive=cd{i}{boot}"));
         }
     }
 
@@ -262,7 +289,7 @@ pub fn build_args(
             format!("socket,id=chrtpm,path={}", tpm_sock.display()),
         );
         arg(&mut a, "tpmdev", "emulator,id=tpm0,chardev=chrtpm".into());
-        let dev = if vm.arch == "x86_64" {
+        let dev = if qemu_arch(vm.arch.as_str()) == "x86_64" {
             "tpm-tis"
         } else {
             "tpm-tis-device"

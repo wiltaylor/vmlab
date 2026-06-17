@@ -90,7 +90,9 @@ pub fn resolve_vm(
         TemplateRef::Store { arch, .. } => arch.clone(),
     };
 
-    let machine = if arch == "x86_64" {
+    let machine = if arch == "x86_64" || arch == "x86" {
+        // `x86` is a display-only alias that runs on the x86_64 emulator, so it
+        // uses the same i440fx/q35 machines from the profile.
         profile
             .machine
             .unwrap_or(Machine::Q35)
