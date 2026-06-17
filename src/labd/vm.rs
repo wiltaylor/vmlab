@@ -262,6 +262,7 @@ impl VmInstance {
                 let fw = match self.resolved.arch.as_str() {
                     "x86_64" => qemu::firmware::ovmf_x86_64(self.resolved.secure_boot)?,
                     "aarch64" => qemu::firmware::uefi_aarch64()?,
+                    "riscv64" => qemu::firmware::uefi_riscv64()?,
                     a => bail!("no UEFI firmware for arch {a}"),
                 };
                 std::fs::copy(&fw.vars_template, self.dirs.ovmf_vars())

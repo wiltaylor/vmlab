@@ -99,6 +99,39 @@ pub fn uefi_aarch64() -> Result<UefiFirmware> {
     })
 }
 
+/// UEFI for riscv64 (EDK2 RiscVVirt). The `virt` machine takes the CODE image
+/// on pflash unit 0 and the writable VARS on unit 1, exactly like aarch64;
+/// the packaged blobs are already padded to the 32 MiB pflash size QEMU
+/// requires (copied verbatim per VM, so the size is preserved).
+pub fn uefi_riscv64() -> Result<UefiFirmware> {
+    let code_candidates: &[&str] = &[
+        "/usr/share/qemu-efi-riscv64/RISCV_VIRT_CODE.fd",
+        "/usr/share/edk2/riscv64/RISCV_VIRT_CODE.fd",
+        "/usr/share/edk2/riscv/RISCV_VIRT_CODE.fd",
+    ];
+    let vars_candidates: &[&str] = &[
+        "/usr/share/qemu-efi-riscv64/RISCV_VIRT_VARS.fd",
+        "/usr/share/edk2/riscv64/RISCV_VIRT_VARS.fd",
+        "/usr/share/edk2/riscv/RISCV_VIRT_VARS.fd",
+    ];
+    let code = first_existing(code_candidates).ok_or_else(|| {
+        anyhow!(
+            "riscv64 UEFI firmware not found; tried: {}",
+            code_candidates.join(", ")
+        )
+    })?;
+    let vars_template = first_existing(vars_candidates).ok_or_else(|| {
+        anyhow!(
+            "riscv64 UEFI VARS template not found; tried: {}",
+            vars_candidates.join(", ")
+        )
+    })?;
+    Ok(UefiFirmware {
+        code,
+        vars_template,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

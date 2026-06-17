@@ -96,8 +96,12 @@ pub fn resolve_vm(
             .unwrap_or(Machine::Q35)
             .qemu_name()
             .to_string()
+    } else if arch == "riscv64" {
+        // RISC-V Linux guests currently boot via device-tree; ACPI consumer
+        // support is still WIP, so pin acpi=off on the generic virt platform.
+        "virt,acpi=off".to_string()
     } else {
-        // Non-x86 system emulators use the generic virtual platform.
+        // Other non-x86 system emulators use the generic virtual platform.
         "virt".to_string()
     };
 
@@ -227,6 +231,16 @@ mod tests {
         );
         let r = resolve_vm(&v, None, &profiles).unwrap();
         assert_eq!(r.machine, "virt");
+    }
+
+    #[test]
+    fn riscv64_uses_virt_machine() {
+        let profiles = ProfileSet::shipped().unwrap();
+        let v = vm(
+            "vm \"a\" { template = \"scratch\" arch = \"riscv64\" profile = \"linux-modern\" disk = \"10G\" }",
+        );
+        let r = resolve_vm(&v, None, &profiles).unwrap();
+        assert_eq!(r.machine, "virt,acpi=off");
     }
 
     #[test]

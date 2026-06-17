@@ -125,6 +125,7 @@ pub fn build_args(
         let fw = match vm.arch.as_str() {
             "x86_64" => firmware::ovmf_x86_64(vm.secure_boot)?,
             "aarch64" => firmware::uefi_aarch64()?,
+            "riscv64" => firmware::uefi_riscv64()?,
             other => anyhow::bail!("no UEFI firmware lookup for arch {other}"),
         };
         arg(
@@ -340,6 +341,8 @@ mod tests {
                 p.machine
                     .map(|m| m.qemu_name().to_string())
                     .unwrap_or("q35".into())
+            } else if arch == "riscv64" {
+                "virt,acpi=off".into()
             } else {
                 "virt".into()
             },
@@ -491,6 +494,31 @@ mod tests {
         assert!(!s.contains("-usb "), "no bare -usb on virt: {s}");
         assert!(s.contains("usb-tablet"), "{s}");
         assert!(s.contains("virtio-gpu-pci"), "{s}");
+        assert!(s.contains("tpm-tis-device,tpmdev=tpm0"), "{s}");
+        assert!(s.contains("virtio-blk-pci,drive=disk0"), "{s}");
+    }
+
+    /// riscv64 shares the aarch64 `virt` path (virtio CD-ROMs, explicit
+    /// xHCI, MMIO swtpm, mandatory UEFI) but pins `acpi=off` on the machine.
+    #[test]
+    fn riscv64_virt_shape() {
+        let mut vm = resolved("linux-modern", "riscv64");
+        vm.tpm = true;
+        let mut p = paths();
+        p.ovmf_vars = Some("/lab/.vmlab/t/RISCV_VIRT_VARS.fd".into());
+        p.tpm_sock = Some("/run/l/t/tpm.sock".into());
+        p.cdroms = vec!["/lab/.vmlab/media/cidata.iso".into()];
+        let s = joined(&build_args("lab1", &vm, &p, Accel::Tcg).unwrap());
+        assert!(s.contains("-machine virt,acpi=off"), "{s}");
+        assert!(s.contains("if=pflash,format=raw,readonly=on"), "UEFI: {s}");
+        assert!(
+            s.contains("virtio-blk-pci,drive=cd0"),
+            "CD-ROM must ride virtio on virt: {s}"
+        );
+        assert!(!s.contains("ide-cd"), "no IDE on virt: {s}");
+        assert!(s.contains("qemu-xhci"), "explicit USB controller: {s}");
+        assert!(!s.contains("-usb "), "no bare -usb on virt: {s}");
+        assert!(s.contains("usb-tablet"), "{s}");
         assert!(s.contains("tpm-tis-device,tpmdev=tpm0"), "{s}");
         assert!(s.contains("virtio-blk-pci,drive=disk0"), "{s}");
     }
