@@ -397,6 +397,21 @@ pub fn lab_module() -> Module {
         .method("stop_force", |v: &VmHandle| -> Result<(), String> {
             v.block(v.vm.stop(true)).map_err(estr)
         })
+        // Clean QMP `quit`: exits QEMU *gracefully*, flushing block-device
+        // caches first (unlike stop_force's SIGKILL). For guests with no ACPI
+        // (DOS, Win 3.x) this is the only way to seal a consistent disk — a
+        // SIGKILL can drop unflushed qcow2 writes and leave it unbootable.
+        .method("poweroff", |v: &VmHandle| -> Result<(), String> {
+            v.block(async {
+                if let Ok(qmp) = v.vm.qmp().await {
+                    // QEMU exits, so the QMP connection drops — that's expected.
+                    let _ = qmp.quit().await;
+                }
+                v.vm.wait_state(PowerState::Stopped, Duration::from_secs(30))
+                    .await
+                    .map_err(estr)
+            })
+        })
         .method("restart", |v: &VmHandle| -> Result<(), String> {
             v.block(async {
                 v.vm.stop(false).await.map_err(estr)?;
