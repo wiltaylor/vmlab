@@ -82,11 +82,11 @@ async fn run_build(
     // Resolve the source into the working primary disk.
     let (cdrom, seed_disk): (Option<PathBuf>, SeedDisk) = match &def.source {
         TemplateSource::Iso(src) => {
-            let iso = resolve_artefact(src, log).await?;
+            let iso = resolve_artefact(src, root, log).await?;
             (Some(iso), SeedDisk::Blank(disk_size))
         }
         TemplateSource::Qcow2(src) => {
-            let img = resolve_artefact(src, log).await?;
+            let img = resolve_artefact(src, root, log).await?;
             (None, SeedDisk::CopyFrom(img))
         }
         TemplateSource::Template { from, .. } => {
@@ -215,8 +215,19 @@ enum SeedDisk {
     CopyFrom(PathBuf),
 }
 
-async fn resolve_artefact(src: &ArtefactSource, log: &OutputSink) -> Result<PathBuf> {
+async fn resolve_artefact(src: &ArtefactSource, root: &Path, log: &OutputSink) -> Result<PathBuf> {
     let log = log.clone();
+    // A local `path` source is relative to the template dir (like media /
+    // provision paths), but the build runs from a separate work dir — rebase
+    // relative paths onto `root` so QEMU can find them.
+    let rebased = match src {
+        ArtefactSource::Path { path, span } if path.is_relative() => Some(ArtefactSource::Path {
+            path: root.join(path),
+            span: *span,
+        }),
+        _ => None,
+    };
+    let src = rebased.as_ref().unwrap_or(src);
     super::artefact::resolve(src, move |m| log(format!("{m}\n"))).await
 }
 
