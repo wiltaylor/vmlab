@@ -48,6 +48,7 @@ pub async fn run_script_file(
     let source =
         std::fs::read_to_string(script).with_context(|| format!("reading {}", script.display()))?;
     let name = script.display().to_string();
+    let ref_base = Arc::new(script_dir(script));
     let rt = tokio::runtime::Handle::current();
     let out_err = output.clone();
     let result = tokio::task::spawn_blocking(move || -> Result<()> {
@@ -60,6 +61,7 @@ pub async fn run_script_file(
             runtime,
             rt,
             output,
+            ref_base,
         };
         vm.call_unit::<_, ()>(&unit, "main", (lab,))
             .map_err(|e| anyhow!("{name}: {}", run_error(e)))
@@ -85,6 +87,7 @@ pub async fn run_event_handler(
         return;
     };
     let name = script.display().to_string();
+    let ref_base = Arc::new(script_dir(script));
     let rt = tokio::runtime::Handle::current();
     let result = tokio::task::spawn_blocking(move || -> Result<()> {
         let ctx = super::context();
@@ -96,6 +99,7 @@ pub async fn run_event_handler(
             runtime,
             rt,
             output,
+            ref_base,
         };
         vm.call_unit::<_, ()>(&unit, "handle", (event, lab))
             .map_err(|e| anyhow!("{name}: {}", run_error(e)))
@@ -106,6 +110,16 @@ pub async fn run_event_handler(
         Ok(Err(e)) => tracing::warn!("event handler failed: {e:#}"),
         Err(e) => tracing::warn!("event handler thread panicked: {e}"),
     }
+}
+
+/// Directory a script file lives in — the base for its relative reference-image
+/// and screenshot paths. Falls back to `.` for a bare filename.
+fn script_dir(script: &Path) -> std::path::PathBuf {
+    script
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
 }
 
 fn compile_error(e: wisp::Error) -> String {

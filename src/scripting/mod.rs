@@ -35,6 +35,11 @@ pub struct LabHandle {
     pub(crate) runtime: Arc<LabRuntime>,
     pub(crate) rt: tokio::runtime::Handle,
     pub(crate) output: OutputSink,
+    /// Directory the running script lives in. Relative reference-image and
+    /// screenshot paths resolve against this, so a provision can ship its
+    /// reference crops next to itself (the build runs from a separate work
+    /// dir, where `runtime.root` points, so that base would not find them).
+    pub(crate) ref_base: Arc<std::path::PathBuf>,
 }
 
 /// A VM handle (PRD §10.3).
@@ -54,6 +59,8 @@ pub struct VmHandle {
     /// to avoid a per-call handshake. Dropped (and reopened on next use) if a
     /// send fails — e.g. the QEMU process was restarted.
     pub(crate) vnc_conn: Arc<tokio::sync::Mutex<Option<crate::vnc::VncInput>>>,
+    /// Directory the running script lives in (see [`LabHandle::ref_base`]).
+    pub(crate) ref_base: Arc<std::path::PathBuf>,
 }
 
 /// A segment handle (PRD §10.2).
@@ -173,7 +180,7 @@ impl VmHandle {
         if p.is_absolute() {
             p
         } else {
-            self.runtime.root.join(p)
+            self.ref_base.join(p)
         }
     }
 
@@ -278,6 +285,7 @@ pub fn lab_module() -> Module {
                     output: l.output.clone(),
                     last_pointer: Default::default(),
                     vnc_conn: Default::default(),
+                    ref_base: l.ref_base.clone(),
                 })
             },
         )
@@ -292,6 +300,7 @@ pub fn lab_module() -> Module {
                     output: l.output.clone(),
                     last_pointer: Default::default(),
                     vnc_conn: Default::default(),
+                    ref_base: l.ref_base.clone(),
                 })
                 .collect()
         })
