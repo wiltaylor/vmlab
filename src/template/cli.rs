@@ -56,6 +56,11 @@ pub enum TemplateCmd {
         reference: String,
         /// Registry reference, e.g. ghcr.io/owner/name:version
         target: String,
+        /// Source repository URL to link the package to (e.g.
+        /// https://github.com/owner/repo). Defaults to the git `origin`
+        /// remote of the current directory when it resolves to a web URL.
+        #[arg(long)]
+        source: Option<String>,
     },
     /// Pull a template from an OCI registry
     Pull {
@@ -92,7 +97,11 @@ pub fn cmd_template(cmd: TemplateCmd) -> Result<()> {
             TemplateCmd::Rm { reference, force } => rm(&reference, force),
             TemplateCmd::Export { reference, out } => export(&reference, &out),
             TemplateCmd::Import { archive, overwrite } => import(&archive, overwrite),
-            TemplateCmd::Push { reference, target } => push(&reference, &target).await,
+            TemplateCmd::Push {
+                reference,
+                target,
+                source,
+            } => push(&reference, &target, source).await,
             TemplateCmd::Pull {
                 target,
                 arch,
@@ -239,16 +248,69 @@ fn import(archive: &std::path::Path, overwrite: bool) -> Result<()> {
     Ok(())
 }
 
-async fn push(reference: &str, target: &str) -> Result<()> {
+async fn push(reference: &str, target: &str, source: Option<String>) -> Result<()> {
     let (arch, name, version) = parse_store_ref(reference)?;
     let resolved = store().resolve(&arch, &name, version.as_deref())?;
     let target = crate::oci::version_in_repo_path(target, Some(&resolved.meta.version))?;
     let host_cfg = crate::config::host::HostConfig::load_default().unwrap_or_default();
-    super::oci_bridge::push(&resolved.dir, &target, host_cfg.oci_chunk_size, &arch)
-        .await
-        .context("pushing to registry")?;
-    println!("pushed {arch}/{name}@{} to {target}", resolved.meta.version);
+    let source = source.or_else(detect_git_source);
+    super::oci_bridge::push(
+        &resolved.dir,
+        &target,
+        host_cfg.oci_chunk_size,
+        &arch,
+        source.as_deref(),
+    )
+    .await
+    .context("pushing to registry")?;
+    match &source {
+        Some(s) => println!(
+            "pushed {arch}/{name}@{} to {target} (source {s})",
+            resolved.meta.version
+        ),
+        None => println!("pushed {arch}/{name}@{} to {target}", resolved.meta.version),
+    }
     Ok(())
+}
+
+/// Best-effort source-repo URL for the package link: the git `origin` remote
+/// of the current directory, normalised to a web URL. Returns `None` when
+/// there is no git, no `origin`, or it isn't a URL we can normalise.
+fn detect_git_source() -> Option<String> {
+    let out = std::process::Command::new("git")
+        .args(["config", "--get", "remote.origin.url"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let url = String::from_utf8(out.stdout).ok()?;
+    normalize_git_url(&url)
+}
+
+/// Normalise a git remote URL to an `https://host/owner/repo` web URL. Handles
+/// scp-like (`git@host:owner/repo.git`), `ssh://`, and `http(s)://` forms;
+/// returns `None` for anything else (e.g. a local path).
+fn normalize_git_url(raw: &str) -> Option<String> {
+    let s = raw.trim();
+    let s = s.strip_suffix(".git").unwrap_or(s);
+    if s.is_empty() {
+        return None;
+    }
+    if let Some(rest) = s.strip_prefix("git@") {
+        // scp-like: host:owner/repo
+        return rest
+            .split_once(':')
+            .map(|(h, p)| format!("https://{h}/{p}"));
+    }
+    if let Some(rest) = s.strip_prefix("ssh://") {
+        let rest = rest.strip_prefix("git@").unwrap_or(rest);
+        return Some(format!("https://{rest}"));
+    }
+    if s.starts_with("https://") || s.starts_with("http://") {
+        return Some(s.to_string());
+    }
+    None
 }
 
 async fn pull(target: &str, arch: Option<&str>, overwrite: bool) -> Result<()> {
@@ -278,5 +340,29 @@ fn parse_store_ref(reference: &str) -> Result<(String, String, Option<String>)> 
             version,
         } => Ok((arch, name, version)),
         _ => bail!("expected a local store reference `<arch>/<name>[@<version>]`"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_git_url;
+
+    #[test]
+    fn normalizes_git_remote_forms() {
+        assert_eq!(
+            normalize_git_url("git@github.com:wiltaylor/vmlab-templates.git").as_deref(),
+            Some("https://github.com/wiltaylor/vmlab-templates")
+        );
+        assert_eq!(
+            normalize_git_url("https://github.com/wiltaylor/vmlab-templates.git\n").as_deref(),
+            Some("https://github.com/wiltaylor/vmlab-templates")
+        );
+        assert_eq!(
+            normalize_git_url("ssh://git@github.com/o/r.git").as_deref(),
+            Some("https://github.com/o/r")
+        );
+        // a local path is not a web URL
+        assert_eq!(normalize_git_url("/srv/git/repo.git"), None);
+        assert_eq!(normalize_git_url(""), None);
     }
 }

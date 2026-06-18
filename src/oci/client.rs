@@ -28,7 +28,8 @@ use super::auth::{self, BearerChallenge, Credential};
 use super::chunking;
 use super::config_blob::TemplateConfig;
 use super::manifest::{
-    Descriptor, ImageIndex, Manifest, ManifestOrIndex, build_manifest, parse_manifest_or_index,
+    Descriptor, ImageIndex, Manifest, ManifestOrIndex, annotations, build_manifest,
+    parse_manifest_or_index,
 };
 use super::media_types;
 use super::reference::Reference;
@@ -116,6 +117,7 @@ impl Registry {
         chunk_size: u64,
         arch: &str,
         work_dir: &Path,
+        source: Option<&str>,
     ) -> Result<()> {
         let repo = self.reference.repository.clone();
         let meta = TemplateMeta::read_from(&template_dir.join(META_FILE)).with_context(|| {
@@ -164,8 +166,15 @@ impl Registry {
         );
 
         // 4. Build + PUT the per-arch manifest (addressed by its digest so
-        // the index can reference it stably).
-        let manifest = build_manifest(&set, config_desc);
+        // the index can reference it stably). Stamp the source-repo
+        // annotation so registries connect the package to its repo (GHCR).
+        let mut manifest = build_manifest(&set, config_desc);
+        if let Some(src) = source {
+            manifest
+                .annotations
+                .get_or_insert_with(BTreeMap::new)
+                .insert(annotations::IMAGE_SOURCE.to_string(), src.to_string());
+        }
         let manifest_bytes = serde_json::to_vec(&manifest)?;
         let manifest_digest = digest_of(&manifest_bytes);
         self.transport
@@ -199,6 +208,12 @@ impl Registry {
                 manifest_bytes.len() as u64,
             ),
         );
+        if let Some(src) = source {
+            index
+                .annotations
+                .get_or_insert_with(BTreeMap::new)
+                .insert(annotations::IMAGE_SOURCE.to_string(), src.to_string());
+        }
         let index_bytes = serde_json::to_vec(&index)?;
         self.transport
             .put_manifest(
@@ -776,9 +791,32 @@ mod tests {
         make_template(&tdir, &m, &disk);
 
         let reg = registry_with_fake("ghcr.io/owner/alpine:3.20", fake.clone());
-        reg.push(&tdir, 1024 * 1024, "x86_64", &work.path().join("push"))
+        reg.push(
+            &tdir,
+            1024 * 1024,
+            "x86_64",
+            &work.path().join("push"),
+            Some("https://github.com/owner/repo"),
+        )
+        .await
+        .unwrap();
+
+        // the source-repo annotation is stamped on the tag's index (what a
+        // registry reads to connect the package to its repo).
+        let index_raw = fake
+            .get_manifest("owner/alpine", "3.20")
             .await
+            .unwrap()
             .unwrap();
+        let index: ImageIndex = serde_json::from_slice(&index_raw.body).unwrap();
+        assert_eq!(
+            index
+                .annotations
+                .as_ref()
+                .and_then(|a| a.get("org.opencontainers.image.source"))
+                .map(String::as_str),
+            Some("https://github.com/owner/repo")
+        );
 
         // pull into a store; work_dir lives under the store root so the
         // install rename stays on one filesystem.
@@ -815,11 +853,11 @@ mod tests {
 
         // push both arches to the same tag
         registry_with_fake("ghcr.io/owner/alpine:3.20", fake.clone())
-            .push(&tx, 1024 * 1024, "x86_64", &work.path().join("px"))
+            .push(&tx, 1024 * 1024, "x86_64", &work.path().join("px"), None)
             .await
             .unwrap();
         registry_with_fake("ghcr.io/owner/alpine:3.20", fake.clone())
-            .push(&ta, 1024 * 1024, "aarch64", &work.path().join("pa"))
+            .push(&ta, 1024 * 1024, "aarch64", &work.path().join("pa"), None)
             .await
             .unwrap();
 
@@ -915,7 +953,7 @@ mod tests {
         let tdir = work.path().join("t");
         make_template(&tdir, &meta("x86_64"), &disk);
         registry_with_fake("ghcr.io/owner/alpine:3.20", fake.clone())
-            .push(&tdir, 1024 * 1024, "x86_64", &work.path().join("p"))
+            .push(&tdir, 1024 * 1024, "x86_64", &work.path().join("p"), None)
             .await
             .unwrap();
 

@@ -33,6 +33,10 @@ pub mod annotations {
     pub const CHUNK_INDEX: &str = "vnd.vmlab.template.chunk.index";
     /// Per-layer: the uncompressed size of this chunk.
     pub const CHUNK_UNCOMPRESSED_SIZE: &str = "vnd.vmlab.template.chunk.uncompressed.size";
+    /// Standard OCI annotation naming the source repository. Registries such
+    /// as GHCR read it to connect a pushed package to its repo; not
+    /// vmlab-namespaced.
+    pub const IMAGE_SOURCE: &str = "org.opencontainers.image.source";
 }
 
 /// An OCI content descriptor.

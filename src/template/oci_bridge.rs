@@ -7,13 +7,21 @@ use anyhow::Result;
 use super::meta::TemplateMeta;
 use super::store::TemplateStore;
 
-pub async fn push(template_dir: &Path, target: &str, chunk_size: u64, arch: &str) -> Result<()> {
+pub async fn push(
+    template_dir: &Path,
+    target: &str,
+    chunk_size: u64,
+    arch: &str,
+    source: Option<&str>,
+) -> Result<()> {
     let registry = crate::oci::Registry::new(target)?;
     // Work area on the same filesystem as the store is unnecessary for push
     // (chunks stage anywhere); use a tempdir under the data dir.
     let work = crate::paths::data_dir().join("cache").join("oci-push");
     std::fs::create_dir_all(&work)?;
-    registry.push(template_dir, chunk_size, arch, &work).await
+    registry
+        .push(template_dir, chunk_size, arch, &work, source)
+        .await
 }
 
 pub async fn pull(
