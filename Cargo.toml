@@ -6,8 +6,8 @@ license = "MIT"
 description = "Single-host virtual machine lab orchestrator"
 
 [dependencies]
-wcl_lang = { path = "../WCL/crates/wcl_lang" }
-wisp = { path = "../wisp/wisp" }
+wcl_lang = { git = "https://github.com/wiltaylor/wcl.git", rev = "1bf3af0876536166855b46e6cd6eb3937505ae5e" }
+wisp = { git = "https://github.com/wiltaylor/wisp.git", rev = "29405c9d519b3e921202833b1ecdb9da9aaf332e" }
 
 anyhow = "1"
 thiserror = "2"

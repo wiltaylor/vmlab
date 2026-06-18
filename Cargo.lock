@@ -2301,6 +2301,7 @@ dependencies = [
 [[package]]
 name = "wcl_lang"
 version = "0.0.0"
+source = "git+https://github.com/wiltaylor/wcl.git?rev=1bf3af0876536166855b46e6cd6eb3937505ae5e#1bf3af0876536166855b46e6cd6eb3937505ae5e"
 dependencies = [
  "miette",
  "serde",
@@ -2563,6 +2564,7 @@ dependencies = [
 [[package]]
 name = "wisp"
 version = "0.1.0"
+source = "git+https://github.com/wiltaylor/wisp.git?rev=29405c9d519b3e921202833b1ecdb9da9aaf332e#29405c9d519b3e921202833b1ecdb9da9aaf332e"
 dependencies = [
  "wisp-compiler",
  "wisp-core",
@@ -2574,6 +2576,7 @@ dependencies = [
 [[package]]
 name = "wisp-compiler"
 version = "0.1.0"
+source = "git+https://github.com/wiltaylor/wisp.git?rev=29405c9d519b3e921202833b1ecdb9da9aaf332e#29405c9d519b3e921202833b1ecdb9da9aaf332e"
 dependencies = [
  "wisp-core",
 ]
@@ -2581,10 +2584,12 @@ dependencies = [
 [[package]]
 name = "wisp-core"
 version = "0.1.0"
+source = "git+https://github.com/wiltaylor/wisp.git?rev=29405c9d519b3e921202833b1ecdb9da9aaf332e#29405c9d519b3e921202833b1ecdb9da9aaf332e"
 
 [[package]]
 name = "wisp-macros"
 version = "0.1.0"
+source = "git+https://github.com/wiltaylor/wisp.git?rev=29405c9d519b3e921202833b1ecdb9da9aaf332e#29405c9d519b3e921202833b1ecdb9da9aaf332e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2594,6 +2599,7 @@ dependencies = [
 [[package]]
 name = "wisp-std"
 version = "0.1.0"
+source = "git+https://github.com/wiltaylor/wisp.git?rev=29405c9d519b3e921202833b1ecdb9da9aaf332e#29405c9d519b3e921202833b1ecdb9da9aaf332e"
 dependencies = [
  "quick-xml",
  "serde_json",
@@ -2605,6 +2611,7 @@ dependencies = [
 [[package]]
 name = "wisp-vm"
 version = "0.1.0"
+source = "git+https://github.com/wiltaylor/wisp.git?rev=29405c9d519b3e921202833b1ecdb9da9aaf332e#29405c9d519b3e921202833b1ecdb9da9aaf332e"
 dependencies = [
  "wisp-core",
 ]
