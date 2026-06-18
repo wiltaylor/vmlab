@@ -16,13 +16,18 @@ pub async fn push(template_dir: &Path, target: &str, chunk_size: u64, arch: &str
     registry.push(template_dir, chunk_size, arch, &work).await
 }
 
-pub async fn pull(target: &str, arch: Option<&str>, store: &TemplateStore) -> Result<TemplateMeta> {
+pub async fn pull(
+    target: &str,
+    arch: Option<&str>,
+    store: &TemplateStore,
+    overwrite: bool,
+) -> Result<TemplateMeta> {
     let registry = crate::oci::Registry::new(target)?;
     // Pull staging must share the store's filesystem for the atomic install
     // rename (the OCI module documents this).
     let work = crate::paths::template_store_dir().join(".oci-pull");
     std::fs::create_dir_all(&work)?;
-    let meta = registry.pull(arch, store, &work, false).await;
+    let meta = registry.pull(arch, store, &work, overwrite).await;
     let _ = std::fs::remove_dir_all(&work);
     meta
 }

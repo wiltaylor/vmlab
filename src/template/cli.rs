@@ -64,6 +64,9 @@ pub enum TemplateCmd {
         /// Architecture to pull (required for multi-arch indexes)
         #[arg(long)]
         arch: Option<String>,
+        /// Overwrite an existing version in the store
+        #[arg(long)]
+        overwrite: bool,
     },
     /// Log in to an OCI registry
     Login {
@@ -90,7 +93,11 @@ pub fn cmd_template(cmd: TemplateCmd) -> Result<()> {
             TemplateCmd::Export { reference, out } => export(&reference, &out),
             TemplateCmd::Import { archive, overwrite } => import(&archive, overwrite),
             TemplateCmd::Push { reference, target } => push(&reference, &target).await,
-            TemplateCmd::Pull { target, arch } => pull(&target, arch.as_deref()).await,
+            TemplateCmd::Pull {
+                target,
+                arch,
+                overwrite,
+            } => pull(&target, arch.as_deref(), overwrite).await,
             TemplateCmd::Login {
                 registry,
                 username,
@@ -232,20 +239,45 @@ fn import(archive: &std::path::Path, overwrite: bool) -> Result<()> {
     Ok(())
 }
 
+/// Lay the version out as the final repository path segment rather than a tag,
+/// so each version is its own path on the registry (`host/owner/name/VERSION`,
+/// wire tag defaults to `latest`). On push the version comes from the resolved
+/// template (any user-supplied tag on the target is ignored); on pull the
+/// version is taken from the reference's `:VERSION` tag, or used as-is when the
+/// caller already wrote it in the path (`host/owner/name/VERSION`).
+fn version_in_repo_path(reference: &str, version: Option<&str>) -> Result<String> {
+    if let Some(v) = version {
+        let r = crate::oci::Reference::parse(reference)?;
+        return Ok(format!("{}/{}/{}", r.host, r.repository, v));
+    }
+    let has_tag = reference
+        .rsplit_once('/')
+        .and_then(|(_, last)| last.split_once(':'))
+        .is_some();
+    if has_tag {
+        let r = crate::oci::Reference::parse(reference)?;
+        Ok(format!("{}/{}/{}", r.host, r.repository, r.tag))
+    } else {
+        Ok(reference.to_string())
+    }
+}
+
 async fn push(reference: &str, target: &str) -> Result<()> {
     let (arch, name, version) = parse_store_ref(reference)?;
     let resolved = store().resolve(&arch, &name, version.as_deref())?;
+    let target = version_in_repo_path(target, Some(&resolved.meta.version))?;
     let host_cfg = crate::config::host::HostConfig::load_default().unwrap_or_default();
-    super::oci_bridge::push(&resolved.dir, target, host_cfg.oci_chunk_size, &arch)
+    super::oci_bridge::push(&resolved.dir, &target, host_cfg.oci_chunk_size, &arch)
         .await
         .context("pushing to registry")?;
-    println!("pushed {arch}/{name} to {target}");
+    println!("pushed {arch}/{name}@{} to {target}", resolved.meta.version);
     Ok(())
 }
 
-async fn pull(target: &str, arch: Option<&str>) -> Result<()> {
+async fn pull(target: &str, arch: Option<&str>, overwrite: bool) -> Result<()> {
+    let target = version_in_repo_path(target, None)?;
     let store = store();
-    let meta = super::oci_bridge::pull(target, arch, &store)
+    let meta = super::oci_bridge::pull(&target, arch, &store, overwrite)
         .await
         .context("pulling from registry")?;
     println!(
@@ -269,5 +301,38 @@ fn parse_store_ref(reference: &str) -> Result<(String, String, Option<String>)> 
             version,
         } => Ok((arch, name, version)),
         _ => bail!("expected a local store reference `<arch>/<name>[@<version>]`"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::version_in_repo_path;
+
+    #[test]
+    fn version_goes_into_the_repo_path() {
+        // push: the resolved version is appended (any tag on the target ignored).
+        assert_eq!(
+            version_in_repo_path("ghcr.io/o/n", Some("1.2.3")).unwrap(),
+            "ghcr.io/o/n/1.2.3"
+        );
+        assert_eq!(
+            version_in_repo_path("ghcr.io/o/n:ignored", Some("1.2.3")).unwrap(),
+            "ghcr.io/o/n/1.2.3"
+        );
+        // pull, tag form: the :version tag becomes the final path segment.
+        assert_eq!(
+            version_in_repo_path("ghcr.io/o/n:1.2.3", None).unwrap(),
+            "ghcr.io/o/n/1.2.3"
+        );
+        // pull, path form: already laid out, used as-is.
+        assert_eq!(
+            version_in_repo_path("ghcr.io/o/n/1.2.3", None).unwrap(),
+            "ghcr.io/o/n/1.2.3"
+        );
+        // a host:port is not mistaken for a tag.
+        assert_eq!(
+            version_in_repo_path("localhost:5000/o/n:1.2.3", None).unwrap(),
+            "localhost:5000/o/n/1.2.3"
+        );
     }
 }
