@@ -9,7 +9,7 @@ The VM block points at a published template:
 
 ```wcl
 vm "alp" {
-  template = "ghcr.io/wiltaylor/vmlab-templates/alpine-3.23:3.23.4"
+  template = "ghcr.io/vmlabdev/vmlab-templates/alpine-3.23:3.23.4"
   arch     = "x86_64"
   ...
 }

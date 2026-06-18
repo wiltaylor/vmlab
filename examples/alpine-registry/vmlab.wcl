@@ -11,7 +11,7 @@
 //   vmlab down
 //
 // The published x86_64 Alpine 3.23 template lives at:
-//   ghcr.io/wiltaylor/vmlab-templates/alpine-3.23:3.23.4
+//   ghcr.io/vmlabdev/vmlab-templates/alpine-3.23:3.23.4
 
 import <vmlab.wcl>
 
@@ -24,7 +24,7 @@ lab "alpine-registry" {
   }
 
   vm "alp" {
-    template = "ghcr.io/wiltaylor/vmlab-templates/alpine-3.23:3.23.4"
+    template = "ghcr.io/vmlabdev/vmlab-templates/alpine-3.23:3.23.4"
     arch     = "x86_64"
     memory   = "1G"
     nic { segment = "lan" }                        // dynamic DHCP lease
