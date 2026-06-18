@@ -43,6 +43,8 @@ pub struct TemplateConfig {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub origin: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub registry: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub sha256: Option<String>,
 }
 
@@ -62,6 +64,7 @@ impl TemplateConfig {
             display: meta.display.clone(),
             created: meta.created.to_rfc3339(),
             origin: meta.origin.clone(),
+            registry: meta.registry.clone(),
             sha256: meta.sha256.clone(),
         }
     }
@@ -87,6 +90,7 @@ impl TemplateConfig {
             display: self.display,
             created,
             origin: origin_override.or(self.origin),
+            registry: self.registry,
             sha256: self.sha256,
         })
     }
@@ -122,6 +126,7 @@ mod tests {
             display: Some("vnc".into()),
             created: "2026-06-12T10:20:30.123456Z".parse().unwrap(),
             origin: Some("https://example.com/win11.iso".into()),
+            registry: Some("ghcr.io/vmlabdev/vmlab-templates/win11".into()),
             sha256: Some("ab".repeat(32)),
         }
     }

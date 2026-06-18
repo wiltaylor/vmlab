@@ -9,17 +9,18 @@ The VM block points at a published template:
 
 ```wcl
 vm "alp" {
-  template = "ghcr.io/vmlabdev/vmlab-templates/alpine-3.23:3.23.4"
+  template = "ghcr.io/vmlabdev/vmlab-templates/alpine-3.23"   // → :latest
   arch     = "x86_64"
   ...
 }
 ```
 
-The ref is `host/owner/[group/]name:version` (the version is the tag, and every
-version of a template lives under one package). On `up`, the per-lab daemon
-checks the local store; if the template is absent it pulls it from the
-registry, installs it, and boots from it. Subsequent `up`s reuse the now-cached
-store copy.
+The ref is `host/owner/[group/]name[:tag]`; every version of a template lives
+under one package as a tag. With no tag it tracks the moving **`latest`**
+(newest stable); `:latest-prerelease` tracks pre-releases and `:<version>`
+pins one. On `up`, the per-lab daemon resolves the tag and, if that version is
+absent locally, pulls and installs it, then boots; a cached version is reused
+without re-downloading.
 
 ## Run
 
@@ -36,8 +37,8 @@ seconds for this ~small Alpine template, depending on your connection).
 ## Cleaning up the cached template
 
 The pull leaves the template in your local store. To force the next `up` to
-pull again:
+pull again, remove the cached version (find it with `vmlab template list`):
 
 ```sh
-vmlab template rm x86_64/alpine-3.23@3.23.4 --force
+vmlab template rm x86_64/alpine-3.23@<version> --force
 ```

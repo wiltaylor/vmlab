@@ -13,6 +13,7 @@ pub async fn push(
     chunk_size: u64,
     arch: &str,
     source: Option<&str>,
+    moving_tag: Option<&str>,
 ) -> Result<()> {
     let registry = crate::oci::Registry::new(target)?;
     // Work area on the same filesystem as the store is unnecessary for push
@@ -20,7 +21,7 @@ pub async fn push(
     let work = crate::paths::data_dir().join("cache").join("oci-push");
     std::fs::create_dir_all(&work)?;
     registry
-        .push(template_dir, chunk_size, arch, &work, source)
+        .push(template_dir, chunk_size, arch, &work, source, moving_tag)
         .await
 }
 

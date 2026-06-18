@@ -66,6 +66,9 @@ pub trait Transport: Send + Sync {
         media_type: &str,
         body: Vec<u8>,
     ) -> Result<String>;
+    /// List the tags of `repository` (`GET /v2/<repo>/tags/list`). Returns an
+    /// empty vec when the repository does not exist yet.
+    async fn list_tags(&self, repository: &str) -> Result<Vec<String>>;
 }
 
 /// The vmlab registry client.
@@ -105,6 +108,12 @@ impl Registry {
         &self.reference.tag
     }
 
+    /// List the tags published under this reference's repository (the version
+    /// tags plus any moving aliases). Empty when the repo does not yet exist.
+    pub async fn list_tags(&self) -> Result<Vec<String>> {
+        self.transport.list_tags(&self.reference.repository).await
+    }
+
     /// Push a template directory (containing `disk.qcow2` + `template.wcl`)
     /// to the reference for the given `arch`. Chunks the disk, uploads each
     /// chunk blob (skipping any already present), uploads the config blob,
@@ -118,6 +127,7 @@ impl Registry {
         arch: &str,
         work_dir: &Path,
         source: Option<&str>,
+        moving_tag: Option<&str>,
     ) -> Result<()> {
         let repo = self.reference.repository.clone();
         let meta = TemplateMeta::read_from(&template_dir.join(META_FILE)).with_context(|| {
@@ -220,10 +230,20 @@ impl Registry {
                 &repo,
                 &self.reference.tag,
                 media_types::OCI_INDEX,
-                index_bytes,
+                index_bytes.clone(),
             )
             .await
             .context("uploading tag index")?;
+
+        // Re-point a moving alias (`latest` / `latest-prerelease`) at the same
+        // merged index — no blob re-upload (PRD §6.4). Each arch push leaves the
+        // alias on the latest complete index.
+        if let Some(alias) = moving_tag {
+            self.transport
+                .put_manifest(&repo, alias, media_types::OCI_INDEX, index_bytes)
+                .await
+                .with_context(|| format!("updating moving tag {alias}"))?;
+        }
 
         tracing::info!(
             reference = %self.reference.canonical(),
@@ -234,19 +254,10 @@ impl Registry {
         Ok(())
     }
 
-    /// Pull the reference for `arch` into `dest_store`. Fetches the tag
-    /// (resolving the index when present — `arch` required unless single),
-    /// verifies the manifest is a vmlab artifact, downloads chunks in
-    /// order, assembles, verifies the whole-image digest, then installs
-    /// into the store recording the originating reference as the origin
-    /// (PRD §6.4).
-    pub async fn pull(
-        &self,
-        arch: Option<&str>,
-        dest_store: &TemplateStore,
-        work_dir: &Path,
-        overwrite: bool,
-    ) -> Result<TemplateMeta> {
+    /// Resolve this reference's tag to the per-arch [`Manifest`] and its
+    /// [`TemplateMeta`] (config blob) — the cheap part of a pull, with no chunk
+    /// download. Used to learn the real version behind a moving tag.
+    async fn resolve_manifest_meta(&self, arch: Option<&str>) -> Result<(Manifest, TemplateMeta)> {
         let repo = &self.reference.repository;
 
         // 1. Fetch the tag and resolve to a single manifest.
@@ -256,11 +267,7 @@ impl Registry {
             .await?
             .ok_or_else(|| anyhow!("reference {} not found", self.reference.canonical()))?;
         let manifest = match parse_manifest_or_index(&top.body)? {
-            ManifestOrIndex::Manifest(m) => {
-                // A plain manifest tag: arch, if given, must match the
-                // config; otherwise accept it as the single arch.
-                m
-            }
+            ManifestOrIndex::Manifest(m) => m,
             ManifestOrIndex::Index(index) => {
                 let desc = index.resolve(arch)?;
                 let fetched = self
@@ -306,6 +313,33 @@ impl Registry {
                 meta.arch
             );
         }
+        Ok((manifest, meta))
+    }
+
+    /// The concrete version behind this reference's tag for `arch` (resolves a
+    /// moving alias like `latest` without downloading the disk).
+    pub async fn resolve_version(&self, arch: Option<&str>) -> Result<String> {
+        Ok(self.resolve_manifest_meta(arch).await?.1.version)
+    }
+
+    /// Pull the reference for `arch` into `dest_store`. Fetches the tag
+    /// (resolving the index when present — `arch` required unless single),
+    /// verifies the manifest is a vmlab artifact, downloads chunks in
+    /// order, assembles, verifies the whole-image digest, then installs
+    /// into the store recording the originating reference as the origin
+    /// (PRD §6.4).
+    pub async fn pull(
+        &self,
+        arch: Option<&str>,
+        dest_store: &TemplateStore,
+        work_dir: &Path,
+        overwrite: bool,
+    ) -> Result<TemplateMeta> {
+        let repo = &self.reference.repository;
+
+        // Steps 1-3: resolve the tag to the per-arch manifest + metadata
+        // (no chunk download yet).
+        let (manifest, meta) = self.resolve_manifest_meta(arch).await?;
 
         // 4. Download chunks in order to a temp dir.
         let chunks_dir = work_dir.join("chunks");
@@ -610,6 +644,61 @@ impl Transport for HttpTransport {
             .unwrap_or_else(|| digest_of(&body));
         Ok(digest)
     }
+
+    async fn list_tags(&self, repository: &str) -> Result<Vec<String>> {
+        #[derive(serde::Deserialize)]
+        struct TagList {
+            #[serde(default)]
+            tags: Option<Vec<String>>,
+        }
+        let scope = self.scope(repository, false);
+        let mut tags = Vec::new();
+        let mut next = Some(self.url(&format!("/v2/{repository}/tags/list?n=1000")));
+        while let Some(url) = next.take() {
+            let resp = self
+                .send_with_auth(&scope, || self.client.get(&url))
+                .await?;
+            // A repository with nothing published yet 404s — treat as empty.
+            if resp.status() == reqwest::StatusCode::NOT_FOUND {
+                return Ok(Vec::new());
+            }
+            if !resp.status().is_success() {
+                bail!("GET tags/list returned {}", resp.status());
+            }
+            let link = resp
+                .headers()
+                .get(reqwest::header::LINK)
+                .and_then(|v| v.to_str().ok())
+                .map(String::from);
+            let body = resp.bytes().await.context("reading tags/list body")?;
+            let parsed: TagList =
+                serde_json::from_slice(&body).context("parsing tags/list response")?;
+            if let Some(mut t) = parsed.tags {
+                tags.append(&mut t);
+            }
+            // Follow `Link: <...>; rel="next"` pagination.
+            next = link.and_then(|l| next_link(&l)).map(|rel| {
+                if rel.starts_with("http://") || rel.starts_with("https://") {
+                    rel
+                } else {
+                    self.url(&rel)
+                }
+            });
+        }
+        Ok(tags)
+    }
+}
+
+/// Extract the `rel="next"` URL from an RFC 5988 `Link` header, if present.
+fn next_link(header: &str) -> Option<String> {
+    for part in header.split(',') {
+        if part.contains("rel=\"next\"") || part.contains("rel=next") {
+            let start = part.find('<')?;
+            let end = part[start..].find('>')? + start;
+            return Some(part[start + 1..end].to_string());
+        }
+    }
+    None
 }
 
 impl HttpTransport {
@@ -719,6 +808,21 @@ mod tests {
                 .insert(key(repo, reference), (media_type.to_string(), body));
             Ok(digest)
         }
+        async fn list_tags(&self, repo: &str) -> Result<Vec<String>> {
+            let prefix = format!("{repo}@");
+            let mut tags: Vec<String> = self
+                .manifests
+                .lock()
+                .unwrap()
+                .keys()
+                .filter_map(|k| k.strip_prefix(&prefix))
+                .filter(|id| !id.starts_with("sha256:"))
+                .map(String::from)
+                .collect();
+            tags.sort();
+            tags.dedup();
+            Ok(tags)
+        }
     }
 
     fn meta(arch: &str) -> TemplateMeta {
@@ -736,6 +840,7 @@ mod tests {
             display: None,
             created: "2026-06-12T00:00:00Z".parse().unwrap(),
             origin: None,
+            registry: None,
             sha256: None,
         }
     }
@@ -775,6 +880,9 @@ mod tests {
             ) -> Result<String> {
                 self.0.put_manifest(r, rf, mt, b).await
             }
+            async fn list_tags(&self, r: &str) -> Result<Vec<String>> {
+                self.0.list_tags(r).await
+            }
         }
         Registry::with_transport(Reference::parse(reference).unwrap(), Box::new(Shared(fake)))
     }
@@ -797,9 +905,19 @@ mod tests {
             "x86_64",
             &work.path().join("push"),
             Some("https://github.com/owner/repo"),
+            Some("latest"),
         )
         .await
         .unwrap();
+
+        // the moving `latest` tag points at the same index as the version tag.
+        let ver_idx = fake.get_manifest("owner/alpine", "3.20").await.unwrap();
+        let latest_idx = fake.get_manifest("owner/alpine", "latest").await.unwrap();
+        assert_eq!(
+            ver_idx.map(|f| f.body),
+            latest_idx.map(|f| f.body),
+            "latest should mirror the version index"
+        );
 
         // the source-repo annotation is stamped on the tag's index (what a
         // registry reads to connect the package to its repo).
@@ -853,11 +971,25 @@ mod tests {
 
         // push both arches to the same tag
         registry_with_fake("ghcr.io/owner/alpine:3.20", fake.clone())
-            .push(&tx, 1024 * 1024, "x86_64", &work.path().join("px"), None)
+            .push(
+                &tx,
+                1024 * 1024,
+                "x86_64",
+                &work.path().join("px"),
+                None,
+                None,
+            )
             .await
             .unwrap();
         registry_with_fake("ghcr.io/owner/alpine:3.20", fake.clone())
-            .push(&ta, 1024 * 1024, "aarch64", &work.path().join("pa"), None)
+            .push(
+                &ta,
+                1024 * 1024,
+                "aarch64",
+                &work.path().join("pa"),
+                None,
+                None,
+            )
             .await
             .unwrap();
 
@@ -953,7 +1085,14 @@ mod tests {
         let tdir = work.path().join("t");
         make_template(&tdir, &meta("x86_64"), &disk);
         registry_with_fake("ghcr.io/owner/alpine:3.20", fake.clone())
-            .push(&tdir, 1024 * 1024, "x86_64", &work.path().join("p"), None)
+            .push(
+                &tdir,
+                1024 * 1024,
+                "x86_64",
+                &work.path().join("p"),
+                None,
+                None,
+            )
             .await
             .unwrap();
 

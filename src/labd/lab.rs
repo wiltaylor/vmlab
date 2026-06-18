@@ -66,9 +66,13 @@ impl LabRuntime {
                 TemplateRef::Registry { reference } => {
                     // A registry reference is pulled on first `up` if absent
                     // from the store, never re-pulled implicitly (PRD §6.4).
-                    // Templates live at `host/owner/[group/]name:VERSION` (the
-                    // version is the tag). So the store name is the last
-                    // repository path component and the version is the tag.
+                    // Templates live at `host/owner/[group/]name:VERSION` — the
+                    // store name is the last repository path component. The tag
+                    // may be a concrete version or a moving alias (`latest` /
+                    // `latest-prerelease`): a concrete version already cached is
+                    // used offline; otherwise resolve the alias to its real
+                    // version (a cheap manifest fetch) and only pull the disk
+                    // when that version isn't already in the store.
                     let arch = vm_cfg.arch.clone().ok_or_else(|| {
                         anyhow!(
                             "vm \"{}\": registry template needs an explicit arch",
@@ -76,24 +80,36 @@ impl LabRuntime {
                         )
                     })?;
                     let registry = crate::oci::Registry::new(reference)?;
-                    let version = registry.tag().to_string();
                     let store_name = registry
                         .repository()
                         .rsplit('/')
                         .next()
                         .unwrap_or_default()
                         .to_string();
-                    let resolved = match store.resolve(&arch, &store_name, Some(&version)) {
+                    let resolved = match store.resolve(&arch, &store_name, Some(registry.tag())) {
+                        // Tag is a concrete, already-cached version: stay offline.
                         Ok(r) => r,
                         Err(_) => {
-                            let work = crate::paths::template_store_dir().join(".oci-pull");
-                            std::fs::create_dir_all(&work)?;
-                            let meta = registry
-                                .pull(Some(&arch), &store, &work, false)
+                            // Resolve the tag (possibly a moving alias) to its
+                            // real version without downloading the disk.
+                            let real = registry
+                                .resolve_version(Some(&arch))
                                 .await
-                                .with_context(|| format!("pulling {reference}"))?;
-                            let _ = std::fs::remove_dir_all(&work);
-                            store.resolve(&meta.arch, &meta.name, Some(&meta.version))?
+                                .with_context(|| format!("resolving {reference}"))?;
+                            match store.resolve(&arch, &store_name, Some(&real)) {
+                                // Moving tag points at an already-cached version.
+                                Ok(r) => r,
+                                Err(_) => {
+                                    let work = crate::paths::template_store_dir().join(".oci-pull");
+                                    std::fs::create_dir_all(&work)?;
+                                    let meta = registry
+                                        .pull(Some(&arch), &store, &work, false)
+                                        .await
+                                        .with_context(|| format!("pulling {reference}"))?;
+                                    let _ = std::fs::remove_dir_all(&work);
+                                    store.resolve(&meta.arch, &meta.name, Some(&meta.version))?
+                                }
+                            }
                         }
                     };
                     (Some(resolved.disk_path.clone()), Some(resolved.meta), None)

@@ -1,8 +1,8 @@
 // Minimal lab that pulls its template straight from an OCI registry.
 //
 // Unlike the other examples, this VM's `template` is an **OCI registry ref**
-// (`host/owner/name/version`) rather than a local `arch/name` store ref. On
-// `vmlab up`, if the template is not already in the local store it is pulled
+// (`host/owner/[group/]name[:tag]`) rather than a local `arch/name` store ref.
+// On `vmlab up`, if the template is not already in the local store it is pulled
 // from the registry, then the VM boots from it (PRD §6.4). No `vmlab template
 // build` or manual `pull` step is required — just:
 //
@@ -10,8 +10,9 @@
 //   ssh vmlab@localhost -p 12222      # password: vmlab
 //   vmlab down
 //
-// The published x86_64 Alpine 3.23 template lives at:
-//   ghcr.io/vmlabdev/vmlab-templates/alpine-3.23:3.23.4
+// The ref below has no tag, so it tracks the moving `:latest` (newest stable)
+// of the published Alpine 3.23 package. Use `...alpine-3.23:latest-prerelease`
+// to track pre-releases, or `...alpine-3.23:<version>` to pin one.
 
 import <vmlab.wcl>
 
@@ -24,7 +25,7 @@ lab "alpine-registry" {
   }
 
   vm "alp" {
-    template = "ghcr.io/vmlabdev/vmlab-templates/alpine-3.23:3.23.4"
+    template = "ghcr.io/vmlabdev/vmlab-templates/alpine-3.23"   // → :latest
     arch     = "x86_64"
     memory   = "1G"
     nic { segment = "lan" }                        // dynamic DHCP lease

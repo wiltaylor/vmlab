@@ -332,6 +332,10 @@ pub struct TemplateDef {
     pub span: Span,
     pub arch: String,
     pub version: String,
+    /// Full OCI repository this template publishes to (host/owner/[group/]name).
+    /// When set, `build` bumps the version against the registry's tags and
+    /// `push` defaults its target here (PRD §6.4).
+    pub registry: Option<String>,
     pub profile: Option<String>,
     pub cpus: Option<u32>,
     pub memory: Option<u64>,

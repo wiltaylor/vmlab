@@ -190,6 +190,7 @@ type TemplateDef {
   @inline(0) name: utf8
   arch: utf8
   version: utf8
+  registry: utf8?          // full OCI repo to publish to / version-bump against
   profile: utf8?
   cpus: i64?
   memory: utf8?

@@ -774,6 +774,7 @@ fn extract_template(b: &Block, issues: &mut IssueList) -> Option<TemplateDef> {
         span,
         arch,
         version,
+        registry: get_str(b, "registry", issues).map(|(s, _)| s),
         profile: get_str(b, "profile", issues).map(|(s, _)| s),
         cpus: get_int(b, "cpus", issues).and_then(|(n, _)| u32::try_from(n).ok()),
         memory: get_size(b, "memory", issues),

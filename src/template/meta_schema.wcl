@@ -24,5 +24,6 @@ type TemplateMeta {
   display: utf8?
   created: utf8       // RFC 3339
   origin: utf8?       // source ISO URL / registry reference
+  registry: utf8?     // full OCI repo this template publishes to
   sha256: utf8?       // hex digest of disk.qcow2
 }

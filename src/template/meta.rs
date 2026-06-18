@@ -40,6 +40,8 @@ pub struct TemplateMeta {
     pub created: DateTime<Utc>,
     /// Where the template came from — source ISO URL, registry ref, …
     pub origin: Option<String>,
+    /// Full OCI repository this template publishes to (host/owner/[group/]name).
+    pub registry: Option<String>,
     /// Hex SHA-256 digest of `disk.qcow2`.
     pub sha256: Option<String>,
 }
@@ -81,6 +83,9 @@ impl TemplateMeta {
         let _ = writeln!(out, "  created = {}", quote(&self.created.to_rfc3339()));
         if let Some(o) = &self.origin {
             let _ = writeln!(out, "  origin = {}", quote(o));
+        }
+        if let Some(r) = &self.registry {
+            let _ = writeln!(out, "  registry = {}", quote(r));
         }
         if let Some(s) = &self.sha256 {
             let _ = writeln!(out, "  sha256 = {}", quote(s));
@@ -156,6 +161,7 @@ fn extract(block: &Block) -> Result<TemplateMeta> {
         display: get_str(block, "display")?,
         created,
         origin: get_str(block, "origin")?,
+        registry: get_str(block, "registry")?,
         sha256: get_str(block, "sha256")?,
     })
 }
@@ -274,6 +280,7 @@ mod tests {
             display: Some("vnc".into()),
             created: "2026-06-12T10:20:30.123456Z".parse().unwrap(),
             origin: Some("https://example.com/win11.iso".into()),
+            registry: Some("ghcr.io/vmlabdev/vmlab-templates/win11".into()),
             sha256: Some("ab".repeat(32)),
         }
     }
@@ -293,6 +300,7 @@ mod tests {
             display: None,
             created: "2026-01-02T03:04:05Z".parse().unwrap(),
             origin: None,
+            registry: None,
             sha256: None,
         }
     }

@@ -19,25 +19,28 @@ use crate::config::model::{ArtefactSource, TemplateDef, TemplateSource};
 use crate::scripting::OutputSink;
 
 /// Build `def` (from a parsed lab/template file rooted at `root`) and install
-/// the result into `store`. `log` streams progress.
+/// the result into `store`. `log` streams progress. The build version is
+/// auto-incremented (PRD §6.4) unless `version_override` pins it.
 pub async fn build_template(
     def: &TemplateDef,
     root: &Path,
     store: &TemplateStore,
     profiles: &crate::profiles::ProfileSet,
     log: OutputSink,
+    version_override: Option<&str>,
 ) -> Result<TemplateMeta> {
-    log(format!(
-        "building {}/{}@{}\n",
-        def.arch, def.name, def.version
-    ));
+    let version = match version_override {
+        Some(v) => v.to_string(),
+        None => next_version(def, store, &log).await?,
+    };
+    log(format!("building {}/{}@{}\n", def.arch, def.name, version));
 
-    if store.exists(&def.arch, &def.name, Some(&def.version)) {
+    if store.exists(&def.arch, &def.name, Some(&version)) {
         bail!(
-            "{}/{}@{} already in the store — remove it first or bump the version",
+            "{}/{}@{} already in the store — remove it first or pick another version",
             def.arch,
             def.name,
-            def.version
+            version
         );
     }
 
@@ -48,9 +51,73 @@ pub async fn build_template(
     std::fs::create_dir_all(&work).with_context(|| format!("creating {}", work.display()))?;
     let guard = WorkdirGuard(work.clone());
 
-    let result = run_build(def, root, &work, store, profiles, &log).await;
+    let result = run_build(def, root, &work, store, profiles, &log, &version).await;
     drop(guard); // always clean up the workdir
     result
+}
+
+/// Pick the next build version by incrementing the last numeric component of
+/// the highest version already known (PRD §6.4). Source of truth, in order:
+/// the template's registry tags, then the local store, then the declared
+/// `version` as a floor. The declared version always participates as a floor,
+/// so the very first build is `<declared>` bumped by one.
+async fn next_version(
+    def: &TemplateDef,
+    store: &TemplateStore,
+    log: &OutputSink,
+) -> Result<String> {
+    use super::store::compare_versions;
+
+    // Candidate floors always include the declared version.
+    let mut best = def.version.clone();
+    let mut source = "declared floor";
+
+    let mut from_registry = false;
+    if let Some(repo) = &def.registry {
+        match list_registry_versions(repo).await {
+            Ok(tags) => {
+                from_registry = true;
+                if let Some(max) = tags.into_iter().max_by(|a, b| compare_versions(a, b))
+                    && compare_versions(&max, &best) == std::cmp::Ordering::Greater
+                {
+                    best = max;
+                    source = "registry";
+                }
+            }
+            Err(e) => log(format!(
+                "warning: could not read registry tags from {repo} ({e:#}); \
+                 falling back to the local store\n"
+            )),
+        }
+    }
+
+    // Fall back to the local store only when the registry wasn't consulted.
+    if !from_registry
+        && let Ok(local) = store.versions_of(&def.arch, &def.name)
+        && let Some(max) = local.into_iter().max_by(|a, b| compare_versions(a, b))
+        && compare_versions(&max, &best) == std::cmp::Ordering::Greater
+    {
+        best = max;
+        source = "local store";
+    }
+
+    let next = super::store::bump_last_numeric(&best)?;
+    log(format!(
+        "auto-version: {next} (bumped from {best}, {source})\n"
+    ));
+    Ok(next)
+}
+
+/// Fetch the concrete version tags published under `repo` (excludes moving
+/// aliases like `latest` / `latest-prerelease`, which do not start with a
+/// digit).
+async fn list_registry_versions(repo: &str) -> Result<Vec<String>> {
+    let registry = crate::oci::Registry::new(repo)?;
+    let tags = registry.list_tags().await?;
+    Ok(tags
+        .into_iter()
+        .filter(|t| t.chars().next().is_some_and(|c| c.is_ascii_digit()))
+        .collect())
 }
 
 struct WorkdirGuard(PathBuf);
@@ -75,6 +142,7 @@ async fn run_build(
     store: &TemplateStore,
     profiles: &crate::profiles::ProfileSet,
     log: &OutputSink,
+    version: &str,
 ) -> Result<TemplateMeta> {
     let disk_size = def.disk.unwrap_or(20 << 30);
     let build_vm = "build";
@@ -177,7 +245,7 @@ async fn run_build(
     let meta = TemplateMeta {
         name: def.name.clone(),
         arch: def.arch.clone(),
-        version: def.version.clone(),
+        version: version.to_string(),
         profile: def.profile.clone(),
         cpus: def.cpus,
         memory: def.memory,
@@ -191,6 +259,7 @@ async fn run_build(
         display: def.display.clone(),
         created: chrono::Utc::now(),
         origin: source_origin(&def.source),
+        registry: def.registry.clone(),
         sha256: Some(sha),
     };
 

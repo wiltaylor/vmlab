@@ -20,6 +20,10 @@ pub enum TemplateCmd {
         file: Option<PathBuf>,
         /// Build only the named template (default: all in the file)
         name: Option<String>,
+        /// Pin an explicit version instead of auto-incrementing (requires a
+        /// single target template)
+        #[arg(long)]
+        version: Option<String>,
     },
     /// List templates in the store
     List {
@@ -54,13 +58,18 @@ pub enum TemplateCmd {
     Push {
         /// Local template `<arch>/<name>[@<version>]`
         reference: String,
-        /// Registry reference, e.g. ghcr.io/owner/name:version
-        target: String,
+        /// Registry repo, e.g. ghcr.io/owner/name. Defaults to the template's
+        /// own `registry` field when omitted.
+        target: Option<String>,
         /// Source repository URL to link the package to (e.g.
         /// https://github.com/owner/repo). Defaults to the git `origin`
         /// remote of the current directory when it resolves to a web URL.
         #[arg(long)]
         source: Option<String>,
+        /// Publish as a pre-release: move `latest-prerelease` instead of
+        /// `latest`.
+        #[arg(long)]
+        prerelease: bool,
     },
     /// Pull a template from an OCI registry
     Pull {
@@ -91,7 +100,11 @@ pub fn cmd_template(cmd: TemplateCmd) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         match cmd {
-            TemplateCmd::Build { file, name } => build(file, name).await,
+            TemplateCmd::Build {
+                file,
+                name,
+                version,
+            } => build(file, name, version).await,
             TemplateCmd::List { json } => list(json),
             TemplateCmd::Exists { reference } => exists(&reference),
             TemplateCmd::Rm { reference, force } => rm(&reference, force),
@@ -101,7 +114,8 @@ pub fn cmd_template(cmd: TemplateCmd) -> Result<()> {
                 reference,
                 target,
                 source,
-            } => push(&reference, &target, source).await,
+                prerelease,
+            } => push(&reference, target, source, prerelease).await,
             TemplateCmd::Pull {
                 target,
                 arch,
@@ -116,7 +130,7 @@ pub fn cmd_template(cmd: TemplateCmd) -> Result<()> {
     })
 }
 
-async fn build(file: Option<PathBuf>, only: Option<String>) -> Result<()> {
+async fn build(file: Option<PathBuf>, only: Option<String>, version: Option<String>) -> Result<()> {
     let cwd = std::env::current_dir()?;
     let path = match file {
         Some(p) => p,
@@ -146,10 +160,20 @@ async fn build(file: Option<PathBuf>, only: Option<String>) -> Result<()> {
             path.display()
         );
     }
+    if version.is_some() && targets.len() > 1 {
+        bail!("--version needs a single target template; pass a template name too");
+    }
     for def in targets {
-        build_template(def, &root, &store, &profiles, log.clone())
-            .await
-            .with_context(|| format!("building {}/{}@{}", def.arch, def.name, def.version))?;
+        build_template(
+            def,
+            &root,
+            &store,
+            &profiles,
+            log.clone(),
+            version.as_deref(),
+        )
+        .await
+        .with_context(|| format!("building {}/{}", def.arch, def.name))?;
     }
     Ok(())
 }
@@ -196,6 +220,7 @@ fn meta_json(t: &crate::template::meta::TemplateMeta) -> serde_json::Value {
         "display": t.display,
         "created": t.created.to_rfc3339(),
         "origin": t.origin,
+        "registry": t.registry,
         "sha256": t.sha256,
     })
 }
@@ -248,10 +273,27 @@ fn import(archive: &std::path::Path, overwrite: bool) -> Result<()> {
     Ok(())
 }
 
-async fn push(reference: &str, target: &str, source: Option<String>) -> Result<()> {
+async fn push(
+    reference: &str,
+    target: Option<String>,
+    source: Option<String>,
+    prerelease: bool,
+) -> Result<()> {
     let (arch, name, version) = parse_store_ref(reference)?;
     let resolved = store().resolve(&arch, &name, version.as_deref())?;
-    let target = crate::oci::with_version_tag(target, &resolved.meta.version)?;
+    // Target repo: explicit CLI arg, else the template's own `registry` field.
+    let repo = match target.or_else(|| resolved.meta.registry.clone()) {
+        Some(t) => t,
+        None => bail!(
+            "no push target — pass one (ghcr.io/owner/name) or set `registry` in the template"
+        ),
+    };
+    let target = crate::oci::with_version_tag(&repo, &resolved.meta.version)?;
+    let moving_tag = if prerelease {
+        "latest-prerelease"
+    } else {
+        "latest"
+    };
     let host_cfg = crate::config::host::HostConfig::load_default().unwrap_or_default();
     let source = source.or_else(detect_git_source);
     super::oci_bridge::push(
@@ -260,16 +302,15 @@ async fn push(reference: &str, target: &str, source: Option<String>) -> Result<(
         host_cfg.oci_chunk_size,
         &arch,
         source.as_deref(),
+        Some(moving_tag),
     )
     .await
     .context("pushing to registry")?;
-    match &source {
-        Some(s) => println!(
-            "pushed {arch}/{name}@{} to {target} (source {s})",
-            resolved.meta.version
-        ),
-        None => println!("pushed {arch}/{name}@{} to {target}", resolved.meta.version),
-    }
+    let src_note = source.map(|s| format!(", source {s}")).unwrap_or_default();
+    println!(
+        "pushed {arch}/{name}@{} to {target} (moved {moving_tag}{src_note})",
+        resolved.meta.version
+    );
     Ok(())
 }
 

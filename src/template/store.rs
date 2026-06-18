@@ -129,7 +129,7 @@ impl TemplateStore {
 
     /// Version directory names present for `<arch>/<name>` (those with
     /// metadata), unsorted.
-    fn versions_of(&self, arch: &str, name: &str) -> Result<Vec<String>> {
+    pub(crate) fn versions_of(&self, arch: &str, name: &str) -> Result<Vec<String>> {
         let mut versions = Vec::new();
         for dir in subdirs(&self.root.join(arch).join(name))? {
             if dir.join(META_FILE).is_file()
@@ -331,6 +331,37 @@ pub fn compare_versions(a: &str, b: &str) -> Ordering {
     a_runs.len().cmp(&b_runs.len()).then_with(|| a.cmp(b))
 }
 
+/// Increment the last maximal run of ASCII digits in `version` by one,
+/// preserving surrounding text: `3.23.4`→`3.23.5`, `9.9`→`9.10`,
+/// `13.20260601`→`13.20260602`, `24.04.4`→`24.04.5`. Errors when `version`
+/// has no digits to bump.
+pub fn bump_last_numeric(version: &str) -> Result<String> {
+    let bytes = version.as_bytes();
+    let mut end = bytes.len();
+    while end > 0 && !bytes[end - 1].is_ascii_digit() {
+        end -= 1;
+    }
+    if end == 0 {
+        anyhow::bail!("version `{version}` has no numeric component to auto-increment");
+    }
+    let mut start = end;
+    while start > 0 && bytes[start - 1].is_ascii_digit() {
+        start -= 1;
+    }
+    let num: u64 = version[start..end].parse().with_context(|| {
+        format!(
+            "version run `{}` is too large to bump",
+            &version[start..end]
+        )
+    })?;
+    Ok(format!(
+        "{}{}{}",
+        &version[..start],
+        num + 1,
+        &version[end..]
+    ))
+}
+
 enum Run<'a> {
     Num(&'a str),
     Text(&'a str),
@@ -435,6 +466,7 @@ mod tests {
             display: None,
             created: "2026-06-12T00:00:00Z".parse().unwrap(),
             origin: None,
+            registry: None,
             sha256: None,
         }
     }
@@ -474,6 +506,22 @@ mod tests {
             compare_versions("99999999999999999999999999999999999999990", "9"),
             Greater
         );
+    }
+
+    // ---- bump_last_numeric --------------------------------------------------
+
+    #[test]
+    fn bump_increments_last_numeric_run() {
+        assert_eq!(bump_last_numeric("3.23.4").unwrap(), "3.23.5");
+        assert_eq!(bump_last_numeric("9.9").unwrap(), "9.10");
+        assert_eq!(bump_last_numeric("13.20260601").unwrap(), "13.20260602");
+        assert_eq!(bump_last_numeric("24.04.4").unwrap(), "24.04.5");
+        assert_eq!(bump_last_numeric("2026.1").unwrap(), "2026.2");
+        // trailing non-digits are kept; the last digit run is the one bumped
+        assert_eq!(bump_last_numeric("1.2-rc9").unwrap(), "1.2-rc10");
+        // no digits -> error
+        assert!(bump_last_numeric("latest").is_err());
+        assert!(bump_last_numeric("").is_err());
     }
 
     // ---- install / list / resolve --------------------------------------------

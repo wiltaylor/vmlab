@@ -190,6 +190,7 @@ mod tests {
             display: None,
             created: chrono::Utc::now(),
             origin: None,
+            registry: None,
             sha256: None,
         }
     }
