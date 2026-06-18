@@ -251,7 +251,7 @@ fn import(archive: &std::path::Path, overwrite: bool) -> Result<()> {
 async fn push(reference: &str, target: &str, source: Option<String>) -> Result<()> {
     let (arch, name, version) = parse_store_ref(reference)?;
     let resolved = store().resolve(&arch, &name, version.as_deref())?;
-    let target = crate::oci::version_in_repo_path(target, Some(&resolved.meta.version))?;
+    let target = crate::oci::with_version_tag(target, &resolved.meta.version)?;
     let host_cfg = crate::config::host::HostConfig::load_default().unwrap_or_default();
     let source = source.or_else(detect_git_source);
     super::oci_bridge::push(
@@ -314,9 +314,8 @@ fn normalize_git_url(raw: &str) -> Option<String> {
 }
 
 async fn pull(target: &str, arch: Option<&str>, overwrite: bool) -> Result<()> {
-    let target = crate::oci::version_in_repo_path(target, None)?;
     let store = store();
-    let meta = super::oci_bridge::pull(&target, arch, &store, overwrite)
+    let meta = super::oci_bridge::pull(target, arch, &store, overwrite)
         .await
         .context("pulling from registry")?;
     println!(

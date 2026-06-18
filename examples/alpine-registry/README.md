@@ -9,16 +9,17 @@ The VM block points at a published template:
 
 ```wcl
 vm "alp" {
-  template = "ghcr.io/wiltaylor/alpine-3.23/3.23.4"
+  template = "ghcr.io/wiltaylor/vmlab-templates/alpine-3.23:3.23.4"
   arch     = "x86_64"
   ...
 }
 ```
 
-The ref is `host/owner/name/version` (the version is the final path segment,
-not a `:tag`). On `up`, the per-lab daemon checks the local store; if the
-template is absent it pulls it from the registry, installs it, and boots from
-it. Subsequent `up`s reuse the now-cached store copy.
+The ref is `host/owner/[group/]name:version` (the version is the tag, and every
+version of a template lives under one package). On `up`, the per-lab daemon
+checks the local store; if the template is absent it pulls it from the
+registry, installs it, and boots from it. Subsequent `up`s reuse the now-cached
+store copy.
 
 ## Run
 
