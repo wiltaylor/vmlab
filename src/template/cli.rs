@@ -41,6 +41,18 @@ pub enum TemplateCmd {
         #[arg(long)]
         force: bool,
     },
+    /// Re-tag a template in the store (new version and/or registry), reusing
+    /// the built image — no rebuild
+    Relabel {
+        /// Existing template `<arch>/<name>@<version>`
+        reference: String,
+        /// New version to give it (default: keep the current version)
+        #[arg(long)]
+        to: Option<String>,
+        /// Set the template's publish registry (full OCI repo)
+        #[arg(long)]
+        registry: Option<String>,
+    },
     /// Export a template to a portable archive
     Export {
         reference: String,
@@ -108,6 +120,11 @@ pub fn cmd_template(cmd: TemplateCmd) -> Result<()> {
             TemplateCmd::List { json } => list(json),
             TemplateCmd::Exists { reference } => exists(&reference),
             TemplateCmd::Rm { reference, force } => rm(&reference, force),
+            TemplateCmd::Relabel {
+                reference,
+                to,
+                registry,
+            } => relabel(&reference, to, registry),
             TemplateCmd::Export { reference, out } => export(&reference, &out),
             TemplateCmd::Import { archive, overwrite } => import(&archive, overwrite),
             TemplateCmd::Push {
@@ -257,6 +274,30 @@ fn rm(reference: &str, force: bool) -> Result<()> {
         }
     })?;
     println!("removed {arch}/{name}@{version}");
+    Ok(())
+}
+
+fn relabel(reference: &str, to: Option<String>, registry: Option<String>) -> Result<()> {
+    let (arch, name, version) = parse_store_ref(reference)?;
+    let version = version
+        .ok_or_else(|| anyhow!("specify the exact version, e.g. {arch}/{name}@<version>"))?;
+    if to.is_none() && registry.is_none() {
+        bail!("nothing to change — pass --to <version> and/or --registry <url>");
+    }
+    let store = store();
+    let resolved = store.resolve(&arch, &name, Some(&version))?;
+    let mut meta = resolved.meta.clone();
+    if let Some(v) = &to {
+        meta.version = v.clone();
+    }
+    if let Some(r) = &registry {
+        meta.registry = Some(r.clone());
+    }
+    store.relabel(&arch, &name, &version, &meta)?;
+    println!(
+        "relabeled {arch}/{name}@{version} -> {}/{}@{}",
+        meta.arch, meta.name, meta.version
+    );
     Ok(())
 }
 
