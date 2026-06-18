@@ -86,9 +86,63 @@ fn looks_like_registry_host(segment: &str) -> bool {
     segment == "localhost" || segment.contains('.') || segment.contains(':')
 }
 
+/// Lay the version out as the final repository path segment rather than a tag,
+/// so each version is its own path on the registry (`host/owner/name/VERSION`,
+/// wire tag `latest`). vmlab uses this layout for templates (PRD §6.4).
+///
+/// - With `version` (push, from the resolved template): it is appended and any
+///   tag on `reference` is ignored.
+/// - Without it (pull / `up`): the version comes from the `:VERSION` tag, or
+///   `reference` is returned unchanged when it already carries the version in
+///   the path (`host/owner/name/VERSION`).
+pub fn version_in_repo_path(reference: &str, version: Option<&str>) -> Result<String> {
+    if let Some(v) = version {
+        let r = Reference::parse(reference)?;
+        return Ok(format!("{}/{}/{}", r.host, r.repository, v));
+    }
+    let has_tag = reference
+        .rsplit_once('/')
+        .and_then(|(_, last)| last.split_once(':'))
+        .is_some();
+    if has_tag {
+        let r = Reference::parse(reference)?;
+        Ok(format!("{}/{}/{}", r.host, r.repository, r.tag))
+    } else {
+        Ok(reference.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn version_goes_into_the_repo_path() {
+        // push: the resolved version is appended (any tag on the target ignored).
+        assert_eq!(
+            version_in_repo_path("ghcr.io/o/n", Some("1.2.3")).unwrap(),
+            "ghcr.io/o/n/1.2.3"
+        );
+        assert_eq!(
+            version_in_repo_path("ghcr.io/o/n:ignored", Some("1.2.3")).unwrap(),
+            "ghcr.io/o/n/1.2.3"
+        );
+        // pull, tag form: the :version tag becomes the final path segment.
+        assert_eq!(
+            version_in_repo_path("ghcr.io/o/n:1.2.3", None).unwrap(),
+            "ghcr.io/o/n/1.2.3"
+        );
+        // pull, path form: already laid out, used as-is.
+        assert_eq!(
+            version_in_repo_path("ghcr.io/o/n/1.2.3", None).unwrap(),
+            "ghcr.io/o/n/1.2.3"
+        );
+        // a host:port is not mistaken for a tag.
+        assert_eq!(
+            version_in_repo_path("localhost:5000/o/n:1.2.3", None).unwrap(),
+            "localhost:5000/o/n/1.2.3"
+        );
+    }
 
     #[test]
     fn parses_ghcr_with_tag() {

@@ -193,17 +193,35 @@ impl Supervisor {
             }
         });
 
-        // Wait for the control socket to come up.
-        for _ in 0..100 {
+        // Wait for the control socket to come up. The daemon binds only
+        // after `LabRuntime::build`, which on a first `up` may pull missing
+        // templates from an OCI registry (PRD §6.4) — that can take minutes,
+        // so a short fixed window is wrong. Instead allow a generous deadline
+        // but bail immediately if the reaper marks the daemon Failed (or it
+        // vanishes), so a genuine startup crash still reports fast.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1800);
+        loop {
             if let Ok(c) = Client::connect(&sock).await
                 && c.call("ping", Value::Null).await.is_ok()
             {
                 self.watch_lab_events(name.to_string()).await;
                 return Ok(sock);
             }
+            {
+                let reg = self.registry.lock().await;
+                match reg.get(name) {
+                    Some(entry) if entry.state == LabState::Failed => {
+                        return Err(format!("lab daemon for {name} failed during startup"));
+                    }
+                    None => return Err(format!("lab daemon for {name} exited during startup")),
+                    _ => {}
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(format!("lab daemon for {name} did not come up"));
+            }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
-        Err(format!("lab daemon for {name} did not come up"))
     }
 
     /// Forward a lab daemon's events into the host-wide aggregate stream

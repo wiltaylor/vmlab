@@ -66,24 +66,21 @@ impl LabRuntime {
                 TemplateRef::Registry { reference } => {
                     // A registry reference is pulled on first `up` if absent
                     // from the store, never re-pulled implicitly (PRD §6.4).
-                    // The store name is the OCI repository's last path
-                    // component; the version is the tag.
+                    // Templates live at `host/owner/name/VERSION` (the version
+                    // is the final repository path segment); a `:VERSION` tag
+                    // form is normalised into that path. So the store name is
+                    // the second-to-last path component, the version the last.
                     let arch = vm_cfg.arch.clone().ok_or_else(|| {
                         anyhow!(
                             "vm \"{}\": registry template needs an explicit arch",
                             vm_cfg.name
                         )
                     })?;
-                    let registry = crate::oci::Registry::new(reference)?;
-                    // Store name = the repository's last path component;
-                    // version = the registry tag.
-                    let store_name = registry
-                        .repository()
-                        .rsplit('/')
-                        .next()
-                        .unwrap_or("")
-                        .to_string();
-                    let version = registry.tag().to_string();
+                    let pull_ref = crate::oci::version_in_repo_path(reference, None)?;
+                    let registry = crate::oci::Registry::new(&pull_ref)?;
+                    let mut segments = registry.repository().rsplit('/');
+                    let version = segments.next().unwrap_or_default().to_string();
+                    let store_name = segments.next().unwrap_or_default().to_string();
                     let resolved = match store.resolve(&arch, &store_name, Some(&version)) {
                         Ok(r) => r,
                         Err(_) => {
