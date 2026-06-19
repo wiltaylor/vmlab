@@ -266,7 +266,10 @@ fn meta_json(t: &crate::template::meta::TemplateMeta) -> serde_json::Value {
 }
 
 struct SearchRow {
+    /// Leaf name (used for query matching).
     name: String,
+    /// Full OCI repository path, e.g. ghcr.io/owner/group/name.
+    repo: String,
     arches: Vec<String>,
     version: String,
     reference: String,
@@ -324,9 +327,15 @@ async fn search(
         println!("no templates found in {namespace}");
         return Ok(());
     }
-    println!("{:<26} {:<28} VERSION", "NAME", "ARCH");
+    let name_w = rows.iter().map(|r| r.repo.len()).max().unwrap_or(0).max(8);
+    println!("{:<name_w$} {:<24} VERSION", "TEMPLATE", "ARCH");
     for r in rows {
-        println!("{:<26} {:<28} {}", r.name, r.arches.join(","), r.version);
+        println!(
+            "{:<name_w$} {:<24} {}",
+            r.repo,
+            r.arches.join(","),
+            r.version
+        );
     }
     Ok(())
 }
@@ -359,6 +368,7 @@ async fn fetch_search_row(repo: String, ns_prefix: &str) -> Option<SearchRow> {
         arches,
         version: tag.clone(),
         reference: format!("{repo}:{tag}"),
+        repo,
     })
 }
 
