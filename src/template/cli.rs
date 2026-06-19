@@ -30,6 +30,10 @@ pub enum TemplateCmd {
         /// Emit a JSON array instead of a table
         #[arg(long)]
         json: bool,
+        /// Also check each template's registry to show whether it's uploaded
+        /// (adds a REMOTE column: yes/no/local). Requires network access.
+        #[arg(long)]
+        remote: bool,
     },
     /// Search a registry for published templates (name substring + arch filter)
     Search {
@@ -134,7 +138,7 @@ pub fn cmd_template(cmd: TemplateCmd) -> Result<()> {
                 name,
                 version,
             } => build(file, name, version).await,
-            TemplateCmd::List { json } => list(json),
+            TemplateCmd::List { json, remote } => list(json, remote).await,
             TemplateCmd::Search {
                 query,
                 registry,
@@ -218,11 +222,38 @@ async fn build(file: Option<PathBuf>, only: Option<String>, version: Option<Stri
     Ok(())
 }
 
-fn list(json: bool) -> Result<()> {
+async fn list(json: bool, remote: bool) -> Result<()> {
     let store = store();
     let templates = store.list()?;
+
+    // With --remote, check each template's registry concurrently (preserving
+    // order) for whether its exact version+arch is already uploaded.
+    let statuses: Vec<String> = if remote {
+        use futures::StreamExt as _;
+        futures::stream::iter(
+            templates
+                .iter()
+                .map(|t| registry_status(t.registry.clone(), t.version.clone(), t.arch.clone())),
+        )
+        .buffered(8)
+        .collect()
+        .await
+    } else {
+        Vec::new()
+    };
+
     if json {
-        let entries: Vec<_> = templates.iter().map(meta_json).collect();
+        let entries: Vec<_> = templates
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let mut v = meta_json(t);
+                if remote {
+                    v["remote"] = serde_json::json!(statuses[i]);
+                }
+                v
+            })
+            .collect();
         println!("{}", serde_json::to_string_pretty(&entries)?);
         return Ok(());
     }
@@ -240,28 +271,64 @@ fn list(json: bool) -> Result<()> {
         .max()
         .unwrap_or(0)
         .max(8);
-    println!(
-        "{:<8} {:<name_w$} {:<16} {:<8} CREATED",
-        "ARCH", "TEMPLATE", "VERSION", "SIZE"
-    );
-    for t in &templates {
+    if remote {
+        println!(
+            "{:<8} {:<name_w$} {:<16} {:<8} {:<7} CREATED",
+            "ARCH", "TEMPLATE", "VERSION", "SIZE", "REMOTE"
+        );
+    } else {
+        println!(
+            "{:<8} {:<name_w$} {:<16} {:<8} CREATED",
+            "ARCH", "TEMPLATE", "VERSION", "SIZE"
+        );
+    }
+    for (i, t) in templates.iter().enumerate() {
         let disk = store
             .root()
             .join(&t.arch)
             .join(&t.name)
             .join(&t.version)
             .join(crate::template::store::DISK_FILE);
-        let size = std::fs::metadata(&disk).map(|m| m.len()).unwrap_or(0);
-        println!(
-            "{:<8} {:<name_w$} {:<16} {:<8} {}",
-            t.arch,
-            name_of(t),
-            t.version,
-            human_size(size),
-            t.created.format("%Y-%m-%d")
-        );
+        let size = human_size(std::fs::metadata(&disk).map(|m| m.len()).unwrap_or(0));
+        let created = t.created.format("%Y-%m-%d");
+        if remote {
+            println!(
+                "{:<8} {:<name_w$} {:<16} {:<8} {:<7} {}",
+                t.arch,
+                name_of(t),
+                t.version,
+                size,
+                statuses[i],
+                created
+            );
+        } else {
+            println!(
+                "{:<8} {:<name_w$} {:<16} {:<8} {}",
+                t.arch,
+                name_of(t),
+                t.version,
+                size,
+                created
+            );
+        }
     }
     Ok(())
+}
+
+/// Whether `<registry>:<version>` already carries `arch` on the remote: `yes`,
+/// `no` (missing — needs upload), `local` (no registry target), or `?` (the
+/// registry ref is malformed).
+async fn registry_status(registry: Option<String>, version: String, arch: String) -> String {
+    let Some(reg) = registry else {
+        return "local".to_string();
+    };
+    let Ok(r) = crate::oci::Registry::new(&reg) else {
+        return "?".to_string();
+    };
+    match r.index_arches(&version).await {
+        Ok(arches) if arches.contains(&arch) => "yes".to_string(),
+        _ => "no".to_string(),
+    }
 }
 
 /// Round a byte count to a short human string (`1.8G`, `456M`, `512B`).
