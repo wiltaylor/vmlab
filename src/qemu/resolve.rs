@@ -49,9 +49,20 @@ fn meta_firmware(s: &str) -> Option<FirmwareKind> {
     }
 }
 
-fn display_device_name(d: &str) -> String {
+fn display_device_name(d: &str, arch: &str) -> String {
+    let x86 = arch == "x86_64" || arch == "x86";
     match d {
         "qxl" => "qxl-vga".to_string(),
+        // VGA-compatible virtio GPU: a real WDDM/DRM device the in-guest virtio
+        // driver binds, while still exposing a legacy VGA framebuffer so the VNC
+        // console / build OCR work before that driver loads. Preferred default
+        // for guests that have a virtio GPU driver (Windows' modern shell
+        // fail-fasts on the Basic Display Adapter). The non-x86 `virt` machine
+        // has no legacy VGA, so virtio-vga is unavailable there — fall back to
+        // the pure virtio GPU, which the same driver binds.
+        "virtio-vga" if !x86 => "virtio-gpu-pci".to_string(),
+        "virtio-vga" => "virtio-vga".to_string(),
+        // Pure virtio GPU, no VGA compatibility.
         "virtio-gpu" => "virtio-gpu-pci".to_string(),
         "std" => "VGA".to_string(),
         other => other.to_string(), // power users may name a QEMU device directly
@@ -121,7 +132,7 @@ pub fn resolve_vm(
         .clone()
         .or_else(|| template.and_then(|t| t.display.clone()))
         .or_else(|| profile.display.clone())
-        .map(|d| display_device_name(&d));
+        .map(|d| display_device_name(&d, &arch));
 
     Ok(ResolvedVm {
         name: lab_vm.name.clone(),

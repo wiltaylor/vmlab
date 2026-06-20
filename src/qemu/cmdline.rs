@@ -378,11 +378,18 @@ mod tests {
             tpm: p.tpm.unwrap_or(false),
             disk_bus: p.disk_bus.unwrap_or(crate::profiles::DiskBus::Virtio),
             nic_model: p.nic_model.clone().unwrap_or("virtio-net-pci".into()),
-            display_device: p.display.clone().map(|d| match d.as_str() {
-                "qxl" => "qxl-vga".to_string(),
-                "virtio-gpu" => "virtio-gpu-pci".to_string(),
-                "std" => "VGA".to_string(),
-                o => o.to_string(),
+            // Mirror of resolve::display_device_name (arch-aware: virtio-vga
+            // downgrades to virtio-gpu-pci off x86).
+            display_device: p.display.clone().map(|d| {
+                let x86 = arch == "x86_64" || arch == "x86";
+                match d.as_str() {
+                    "qxl" => "qxl-vga".to_string(),
+                    "virtio-vga" if !x86 => "virtio-gpu-pci".to_string(),
+                    "virtio-vga" => "virtio-vga".to_string(),
+                    "virtio-gpu" => "virtio-gpu-pci".to_string(),
+                    "std" => "VGA".to_string(),
+                    o => o.to_string(),
+                }
             }),
             agent_channel: true,
             input_transport: crate::profiles::InputTransport::Qmp,
@@ -426,7 +433,7 @@ mod tests {
         assert!(s.contains("driver=cfi.pflash01,property=secure,value=on"));
         assert!(s.contains("virtio-blk-pci,drive=disk0"));
         assert!(s.contains("tpm-tis,tpmdev=tpm0"));
-        assert!(s.contains("qxl-vga"));
+        assert!(s.contains("virtio-vga"));
         assert!(s.contains("org.qemu.guest_agent.0"));
         assert!(s.contains("netdev=net0,mac=52:54:00:00:00:01"));
         assert!(s.contains("-vnc unix:/run/l/t/vnc.sock"));

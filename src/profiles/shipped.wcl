@@ -12,7 +12,7 @@ profile "windows-11" {
   tpm         = true
   disk_bus    = "virtio"
   nic_model   = "virtio-net-pci"
-  display     = "qxl"
+  display     = "virtio-vga"
   cpus        = 4
   memory      = "8G"
 }
@@ -25,7 +25,7 @@ profile "windows-10" {
   tpm         = false
   disk_bus    = "virtio"
   nic_model   = "virtio-net-pci"
-  display     = "qxl"
+  display     = "virtio-vga"
   cpus        = 4
   memory      = "8G"
 }
@@ -38,7 +38,7 @@ profile "windows-server" {
   tpm         = true
   disk_bus    = "virtio"
   nic_model   = "virtio-net-pci"
-  display     = "qxl"
+  display     = "virtio-vga"
   cpus        = 4
   memory      = "8G"
 }
@@ -80,7 +80,9 @@ profile "linux-modern" {
   tpm         = false
   disk_bus    = "virtio"
   nic_model   = "virtio-net-pci"
-  display     = "virtio-gpu"
+  // VGA-compatible virtio GPU on x86; auto-downgrades to virtio-gpu-pci on the
+  // non-x86 `virt` machine (no legacy VGA there). See display_device_name.
+  display     = "virtio-vga"
   cpus        = 2
   memory      = "4G"
 }
