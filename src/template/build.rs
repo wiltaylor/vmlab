@@ -56,33 +56,28 @@ pub async fn build_template(
     result
 }
 
-/// Pick the next build version by incrementing the last numeric component of
-/// the highest version already known (PRD §6.4). Source of truth, in order:
-/// the template's registry tags, then the local store, then the declared
-/// `version` as a floor. The declared version always participates as a floor,
-/// so the very first build is `<declared>` bumped by one.
+/// Pick the next build version (PRD §6.4). The declared `version` is a fixed
+/// prefix (the upstream/OS identity); vmlab appends a trailing build counter,
+/// `<declared>.<N>`, where N is the highest existing `<declared>.<N>` plus one,
+/// or 0 if none exist yet. Existing builds come from the template's registry
+/// tags when it has a `registry` (falling back to the local store), so the
+/// counter continues across machines. Changing the declared prefix (e.g. a new
+/// Windows build number) restarts the counter at `.0`.
 async fn next_version(
     def: &TemplateDef,
     store: &TemplateStore,
     log: &OutputSink,
 ) -> Result<String> {
-    use super::store::compare_versions;
-
-    // Candidate floors always include the declared version.
-    let mut best = def.version.clone();
-    let mut source = "declared floor";
+    let mut existing: Vec<String> = Vec::new();
+    let mut source = "fresh";
 
     let mut from_registry = false;
     if let Some(repo) = &def.registry {
         match list_registry_versions(repo).await {
             Ok(tags) => {
                 from_registry = true;
-                if let Some(max) = tags.into_iter().max_by(|a, b| compare_versions(a, b))
-                    && compare_versions(&max, &best) == std::cmp::Ordering::Greater
-                {
-                    best = max;
-                    source = "registry";
-                }
+                existing = tags;
+                source = "registry";
             }
             Err(e) => log(format!(
                 "warning: could not read registry tags from {repo} ({e:#}); \
@@ -92,18 +87,15 @@ async fn next_version(
     }
 
     // Fall back to the local store only when the registry wasn't consulted.
-    if !from_registry
-        && let Ok(local) = store.versions_of(&def.arch, &def.name)
-        && let Some(max) = local.into_iter().max_by(|a, b| compare_versions(a, b))
-        && compare_versions(&max, &best) == std::cmp::Ordering::Greater
-    {
-        best = max;
+    if !from_registry && let Ok(local) = store.versions_of(&def.arch, &def.name) {
+        existing = local;
         source = "local store";
     }
 
-    let next = super::store::bump_last_numeric(&best)?;
+    let next = super::store::next_subbuild(&def.version, &existing);
     log(format!(
-        "auto-version: {next} (bumped from {best}, {source})\n"
+        "auto-version: {next} (prefix {}, {source})\n",
+        def.version
     ));
     Ok(next)
 }

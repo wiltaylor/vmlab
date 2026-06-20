@@ -366,35 +366,25 @@ pub fn compare_versions(a: &str, b: &str) -> Ordering {
     a_runs.len().cmp(&b_runs.len()).then_with(|| a.cmp(b))
 }
 
-/// Increment the last maximal run of ASCII digits in `version` by one,
-/// preserving surrounding text: `3.23.4`→`3.23.5`, `9.9`→`9.10`,
-/// `13.20260601`→`13.20260602`, `24.04.4`→`24.04.5`. Errors when `version`
-/// has no digits to bump.
-pub fn bump_last_numeric(version: &str) -> Result<String> {
-    let bytes = version.as_bytes();
-    let mut end = bytes.len();
-    while end > 0 && !bytes[end - 1].is_ascii_digit() {
-        end -= 1;
+/// Next build version for a fixed `prefix` (the template's declared `version`):
+/// append a trailing build-counter component. `N` = the highest existing
+/// `<prefix>.<N>` plus one, or `0` if none exist yet — so `26100.1742` →
+/// `26100.1742.0`, `.1`, `.2`, … Only exact `<prefix>.<digits>` forms count
+/// (one extra all-numeric component); the bare prefix and unrelated versions are
+/// ignored, so changing the declared prefix restarts the counter at `.0`.
+pub fn next_subbuild(prefix: &str, existing: &[String]) -> String {
+    let dotted = format!("{prefix}.");
+    let max = existing.iter().filter_map(|v| {
+        let rest = v.strip_prefix(&dotted)?;
+        if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        rest.parse::<u64>().ok()
+    });
+    match max.max() {
+        Some(n) => format!("{prefix}.{}", n + 1),
+        None => format!("{prefix}.0"),
     }
-    if end == 0 {
-        anyhow::bail!("version `{version}` has no numeric component to auto-increment");
-    }
-    let mut start = end;
-    while start > 0 && bytes[start - 1].is_ascii_digit() {
-        start -= 1;
-    }
-    let num: u64 = version[start..end].parse().with_context(|| {
-        format!(
-            "version run `{}` is too large to bump",
-            &version[start..end]
-        )
-    })?;
-    Ok(format!(
-        "{}{}{}",
-        &version[..start],
-        num + 1,
-        &version[end..]
-    ))
 }
 
 enum Run<'a> {
@@ -543,20 +533,35 @@ mod tests {
         );
     }
 
-    // ---- bump_last_numeric --------------------------------------------------
+    // ---- next_subbuild ------------------------------------------------------
 
     #[test]
-    fn bump_increments_last_numeric_run() {
-        assert_eq!(bump_last_numeric("3.23.4").unwrap(), "3.23.5");
-        assert_eq!(bump_last_numeric("9.9").unwrap(), "9.10");
-        assert_eq!(bump_last_numeric("13.20260601").unwrap(), "13.20260602");
-        assert_eq!(bump_last_numeric("24.04.4").unwrap(), "24.04.5");
-        assert_eq!(bump_last_numeric("2026.1").unwrap(), "2026.2");
-        // trailing non-digits are kept; the last digit run is the one bumped
-        assert_eq!(bump_last_numeric("1.2-rc9").unwrap(), "1.2-rc10");
-        // no digits -> error
-        assert!(bump_last_numeric("latest").is_err());
-        assert!(bump_last_numeric("").is_err());
+    fn next_subbuild_appends_and_increments_counter() {
+        let s = |xs: &[&str]| xs.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+
+        // No existing builds for the prefix -> start at .0.
+        assert_eq!(next_subbuild("26100.1742", &[]), "26100.1742.0");
+        // Highest existing trailing component + 1.
+        assert_eq!(
+            next_subbuild("26100.1742", &s(&["26100.1742.0"])),
+            "26100.1742.1"
+        );
+        assert_eq!(
+            next_subbuild("26100.1742", &s(&["26100.1742.0", "26100.1742.3"])),
+            "26100.1742.4"
+        );
+        // The bare prefix, a different prefix, and a non-dot continuation are all
+        // ignored when counting -> still .0.
+        assert_eq!(
+            next_subbuild(
+                "26100.1742",
+                &s(&["26100.1742", "26100.1743", "26100.17425"])
+            ),
+            "26100.1742.0"
+        );
+        // Works for a declared 3-component prefix (counter becomes the 4th).
+        assert_eq!(next_subbuild("3.23.4", &s(&["3.23.4.2"])), "3.23.4.3");
+        assert_eq!(next_subbuild("3.23.4", &[]), "3.23.4.0");
     }
 
     // ---- install / list / resolve --------------------------------------------
