@@ -42,6 +42,11 @@ pub enum Command {
         #[command(subcommand)]
         cmd: VmCmd,
     },
+    /// Manage running labs host-wide: list / info / stop / destroy
+    Lab {
+        #[command(subcommand)]
+        cmd: lab::LabCmd,
+    },
     /// Take, restore, list, and delete VM/lab snapshots
     Snapshot {
         #[command(subcommand)]
@@ -182,6 +187,7 @@ pub fn run() -> ExitCode {
             VmCmd::Stop { vm, force } => lab::cmd_vm_power(&vm, "stop", force),
             VmCmd::Restart { vm } => lab::cmd_vm_power(&vm, "restart", false),
         },
+        Command::Lab { cmd } => lab::cmd_lab(cmd),
         Command::Snapshot { cmd } => match cmd {
             SnapshotCmd::Create { name, vm } => lab::cmd_snapshot(vm, name),
             SnapshotCmd::Restore { name, vm } => lab::cmd_restore(vm, name),

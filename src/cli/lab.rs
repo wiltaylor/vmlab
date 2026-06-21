@@ -188,6 +188,160 @@ fn print_status(status: &Value) {
     }
 }
 
+/// Manage running labs host-wide, by name (not the cwd's lab).
+#[derive(clap::Subcommand)]
+pub enum LabCmd {
+    /// List every tracked lab: name, state, and directory
+    List {
+        /// Emit a JSON array instead of a table
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show detailed status (VMs and segments) of a running lab
+    Info { lab: String },
+    /// Gracefully stop a running lab; clones retained
+    Stop {
+        lab: String,
+        /// Hard kill instead of the graceful ladder
+        #[arg(long)]
+        force: bool,
+    },
+    /// Stop a lab and delete its clones and local state
+    Destroy { lab: String },
+}
+
+pub fn cmd_lab(cmd: LabCmd) -> Result<()> {
+    match cmd {
+        LabCmd::List { json } => cmd_lab_list(json),
+        LabCmd::Info { lab } => cmd_lab_info(&lab),
+        LabCmd::Stop { lab, force } => cmd_lab_stop(&lab, force),
+        LabCmd::Destroy { lab } => cmd_lab_destroy(&lab),
+    }
+}
+
+/// Ask the supervisor for its lab registry. Returns an empty list when the
+/// supervisor isn't running — read-only queries don't auto-start it.
+async fn registry_labs() -> Result<Vec<Value>> {
+    let sock = crate::paths::supervisor_socket();
+    let Ok(client) = Client::connect(&sock).await else {
+        return Ok(Vec::new());
+    };
+    let labs = client.call("status", Value::Null).await.map_err(remote)?;
+    Ok(labs.as_array().cloned().unwrap_or_default())
+}
+
+/// Find a registry entry's root directory by lab name.
+fn root_for(labs: &[Value], name: &str) -> Option<std::path::PathBuf> {
+    labs.iter()
+        .find(|l| l["name"].as_str() == Some(name))
+        .and_then(|l| l["root"].as_str())
+        .map(std::path::PathBuf::from)
+}
+
+fn cmd_lab_list(json: bool) -> Result<()> {
+    rt()?.block_on(async {
+        let labs = registry_labs().await?;
+        if json {
+            println!("{}", serde_json::to_string_pretty(&labs)?);
+            return Ok(());
+        }
+        if labs.is_empty() {
+            println!("no running labs");
+            return Ok(());
+        }
+        let name_w = labs
+            .iter()
+            .map(|l| l["name"].as_str().unwrap_or("?").len())
+            .max()
+            .unwrap_or(0)
+            .max(4);
+        println!("{:<name_w$} {:<10} DIRECTORY", "NAME", "STATE");
+        for l in &labs {
+            println!(
+                "{:<name_w$} {:<10} {}",
+                l["name"].as_str().unwrap_or("?"),
+                l["state"].as_str().unwrap_or("?"),
+                l["root"].as_str().unwrap_or("?"),
+            );
+        }
+        Ok(())
+    })
+}
+
+fn cmd_lab_info(name: &str) -> Result<()> {
+    rt()?.block_on(async {
+        let labs = registry_labs().await?;
+        let entry = labs.iter().find(|l| l["name"].as_str() == Some(name));
+        match daemon::try_lab_daemon(name).await {
+            Some(client) => {
+                if let Some(root) = entry.and_then(|l| l["root"].as_str()) {
+                    println!("directory: {root}");
+                }
+                let status = client.call("status", Value::Null).await.map_err(remote)?;
+                print_status(&status);
+                Ok(())
+            }
+            // Registered but unreachable (e.g. crashed/Failed): show what the
+            // registry knows.
+            None => match entry {
+                Some(l) => {
+                    println!(
+                        "lab \"{name}\" [{}] (not reachable) directory {}",
+                        l["state"].as_str().unwrap_or("?"),
+                        l["root"].as_str().unwrap_or("?"),
+                    );
+                    Ok(())
+                }
+                None => bail!("lab \"{name}\" is not running"),
+            },
+        }
+    })
+}
+
+fn cmd_lab_stop(name: &str, force: bool) -> Result<()> {
+    rt()?.block_on(async {
+        let Some(client) = daemon::try_lab_daemon(name).await else {
+            println!("lab \"{name}\" is not running");
+            return Ok(());
+        };
+        client
+            .call("down", json!({"vms": Vec::<String>::new(), "force": force}))
+            .await
+            .map_err(remote)?;
+        println!("lab \"{name}\" is down (clones retained)");
+        Ok(())
+    })
+}
+
+fn cmd_lab_destroy(name: &str) -> Result<()> {
+    rt()?.block_on(async {
+        let labs = registry_labs().await?;
+        let root = root_for(&labs, name);
+        match daemon::try_lab_daemon(name).await {
+            Some(client) => {
+                client.call("destroy", Value::Null).await.map_err(remote)?;
+            }
+            None => match &root {
+                // No daemon, but .vmlab may still hold clones to clean up.
+                Some(root) => {
+                    let lab_local = crate::paths::lab_local_dir(root);
+                    if lab_local.exists() {
+                        std::fs::remove_dir_all(&lab_local)
+                            .with_context(|| format!("removing {}", lab_local.display()))?;
+                    }
+                }
+                None => bail!("lab \"{name}\" is not running"),
+            },
+        }
+        // Reap the lab daemon.
+        if let Ok(sup) = daemon::ensure_supervisor().await {
+            let _ = sup.call("lab.release", json!({"name": name})).await;
+        }
+        println!("lab \"{name}\" destroyed");
+        Ok(())
+    })
+}
+
 pub fn cmd_vm_power(vm_ref: &str, op: &str, force: bool) -> Result<()> {
     rt()?.block_on(async {
         let (lab, vm) = split_vm_ref(vm_ref)?;
@@ -570,4 +724,24 @@ pub fn cmd_logs(target: Option<String>, follow: bool, lines: usize) -> Result<()
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::root_for;
+    use serde_json::json;
+
+    #[test]
+    fn root_for_matches_by_name() {
+        let labs = vec![
+            json!({"name": "alpha", "root": "/labs/alpha", "state": "running"}),
+            json!({"name": "beta", "root": "/labs/beta", "state": "failed"}),
+        ];
+        assert_eq!(
+            root_for(&labs, "beta").unwrap(),
+            std::path::PathBuf::from("/labs/beta")
+        );
+        assert!(root_for(&labs, "gamma").is_none());
+        assert!(root_for(&[], "alpha").is_none());
+    }
 }
