@@ -93,8 +93,6 @@ pub enum Command {
         /// Destination as <vm>:<path> (parent directories are created)
         dest: String,
     },
-    /// Print guest OS information (guest-get-osinfo) as JSON
-    Osinfo { vm: String },
     /// Tail or dump JSON-line logs for the lab or one VM
     Logs {
         /// [lab/][vm] (default: the cwd's lab)
@@ -107,6 +105,7 @@ pub enum Command {
         lines: usize,
     },
     /// Supervisor control (normally automatic)
+    #[command(hide = true)]
     Daemon {
         #[command(subcommand)]
         cmd: daemon::DaemonCmd,
@@ -203,7 +202,6 @@ pub fn run() -> ExitCode {
             .map(|()| println!("wrote {}", out.display())),
         Command::Exec { vm, timeout, cmd } => lab::cmd_exec(&vm, timeout, cmd),
         Command::Cp { src, dest } => lab::cmd_cp(&src, &dest),
-        Command::Osinfo { vm } => lab::cmd_osinfo(&vm),
         Command::Logs {
             target,
             follow,

@@ -389,21 +389,6 @@ pub fn cmd_exec(vm_ref: &str, timeout: u64, cmd: Vec<String>) -> Result<()> {
     })
 }
 
-/// `vmlab osinfo <vm>` — guest OS identification as one JSON object, fit
-/// for machine consumption (config-weave's testlab parses it).
-pub fn cmd_osinfo(vm_ref: &str) -> Result<()> {
-    rt()?.block_on(async {
-        let (lab, vm) = split_vm_ref(vm_ref)?;
-        let (_name, client) = lab_client_for(lab).await?;
-        let info = client
-            .call("vm.osinfo", json!({"vm": vm}))
-            .await
-            .map_err(remote)?;
-        println!("{info}");
-        Ok(())
-    })
-}
-
 /// Per-message payload for `vm.copy_in` (pre-base64). Modest chunks keep
 /// each JSON line small and each agent call inside its timeout.
 const CP_CHUNK: usize = 1 << 20;
