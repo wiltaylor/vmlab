@@ -1,0 +1,41 @@
+// vmlab's website, authored in wdoc and rendered by the `wcl` CLI.
+//
+//   wcl wdoc serve docs/main.wcl                 # / = landing, /wskills/vmlab/ = reference book
+//   wcl wdoc build docs/main.wcl --out docs/_site
+//     → docs/_site/index.html         vmlab landing (webpage template)
+//       docs/_site/wskills/vmlab/…     vmlab reference (the vmlab wskill's book)
+//
+// The single `import <wdoc.wcl>` pulls in the embedded wdoc standard library, so
+// every stdlib block (page / h1..h6 / p / code / callout / table / column / …) is
+// in scope here and in every imported page.
+import <wdoc.wcl>
+
+// The reference content lives in a wskill — a self-contained WCL model under
+// docs/wskills/, projected into a book (included here) and a Claude Code skill.
+// `include` builds every member's book under docs/_site/wskills/<name>/; the
+// landing page lists them via `included_sites(...)`.
+include "wskills" { entry = "wdoc/book/main.wcl" }
+
+// The vmlab landing: the `webpage` template (title header + top navbar). `root =
+// true` serves it at `/`; the reference book renders under `/wskills/vmlab/`.
+site vmlab {
+  default_template = :webpage
+  title            = "vmlab"
+  root             = true
+  theme            = :nord
+  accent           = :cyan
+  menu {
+    item "Home"            { page = index }
+    item "Features"        { page = features }
+    item "Getting started" { page = getting_started }
+    // The reference is its own built site (the vmlab wskill's book); link by its
+    // root-relative output path.
+    item "Reference"       { href = "wskills/vmlab/" }
+    item "Source"          { href = "https://github.com/wiltaylor/vmlab" }
+  }
+}
+
+// vmlab landing pages (sites = [:vmlab]).
+import "./pages/vmlab/index.wcl"
+import "./pages/vmlab/features.wcl"
+import "./pages/vmlab/getting-started.wcl"

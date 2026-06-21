@@ -1,0 +1,217 @@
+// The `vmlab` CLI, mapped as data via the opt-in cli module (schema/cli.wcl).
+// Sourced from the cli reference + src/cli/, src/template/cli.rs, src/cli/daemon.rs.
+// Lab-scoped verbs locate the lab by walking up from cwd to the nearest vmlab.wcl.
+// Daemons auto-start as needed — there is no setup step.
+//
+// audience = :both so the CLI renders in both the website book and the skill.
+
+cli vmlab_cli {
+  name        = "vmlab"
+  version     = "1.0"
+  description = "The vmlab command-line interface: lab lifecycle, per-VM power, snapshots, guest execution and scripting, console and logs, template builds and OCI distribution, and the daemons."
+  audience    = :both
+
+  // ---- Lab lifecycle ----
+
+  subcommand c_validate {
+    name = "validate"
+    description = "WCL schema + semantic validation of the lab, with no side effects. Run after editing vmlab.wcl and before `up`."
+    code_example { lang = "console"  code = "vmlab validate" }
+  }
+
+  subcommand c_up {
+    name = "up"
+    description = "Create linked clones, boot the VMs (a subset is optional), and run provision scripts in declaration order."
+    cli_arg a_up_vms { name = "vm"  description = "Optional VMs to bring up; omit for the whole lab."  required = false  variadic = true }
+    code_example { lang = "console"  code = "vmlab up\nvmlab up dc01 client01" }
+  }
+
+  subcommand c_down {
+    name = "down"
+    description = "Graceful stop (guest agent → ACPI → kill). Linked clones are retained."
+    cli_arg a_down_vms { name = "vm"  description = "Optional VMs to stop; omit for the whole lab."  required = false  variadic = true }
+    cli_switch s_down_force { long = "--force"  description = "Skip the graceful ladder and kill immediately." }
+    code_example { lang = "console"  code = "vmlab down" }
+  }
+
+  subcommand c_destroy {
+    name = "destroy"
+    description = "Stop the lab and DELETE its linked clones, lab-local state and dynamic network config. Destructive."
+    code_example { lang = "console"  code = "vmlab destroy" }
+  }
+
+  subcommand c_status {
+    name = "status"
+    description = "Show lab / VM / segment state, IPs and ready flags."
+    code_example { lang = "console"  code = "vmlab status" }
+  }
+
+  // ---- Per-VM power ----
+
+  subcommand c_vm {
+    name = "vm"
+    description = "Per-VM power control."
+    subcommand c_vm_start {
+      name = "start"
+      description = "Start a single VM."
+      cli_arg a_vm_start { name = "vm"  description = "VM name." }
+      code_example { lang = "console"  code = "vmlab vm start dc01" }
+    }
+    subcommand c_vm_stop {
+      name = "stop"
+      description = "Stop a single VM gracefully."
+      cli_arg a_vm_stop { name = "vm"  description = "VM name." }
+      cli_switch s_vm_stop_force { long = "--force"  description = "Kill immediately instead of the graceful ladder." }
+      code_example { lang = "console"  code = "vmlab vm stop dc01" }
+    }
+    subcommand c_vm_restart {
+      name = "restart"
+      description = "Restart a single VM."
+      cli_arg a_vm_restart { name = "vm"  description = "VM name." }
+      code_example { lang = "console"  code = "vmlab vm restart dc01" }
+    }
+  }
+
+  // ---- Snapshots ----
+
+  subcommand c_snapshot {
+    name = "snapshot"
+    description = "Online (running: disk+RAM+device state) or offline (powered off: disk only) snapshots, per current power state. Restoring an online snapshot resumes running."
+    subcommand c_snap_create {
+      name = "create"
+      description = "Create a snapshot. Omitting --vm snapshots every VM in the lab (best-effort, not coordinated)."
+      cli_arg a_snap_create_name { name = "name"  description = "Snapshot name." }
+      cli_switch s_snap_create_vm { long = "--vm"  value_name = "VM"  description = "Target a single VM; omit for the whole lab." }
+      code_example { lang = "console"  code = "vmlab snapshot create clean --vm dc01" }
+    }
+    subcommand c_snap_restore {
+      name = "restore"
+      description = "Restore a snapshot."
+      cli_arg a_snap_restore_name { name = "name"  description = "Snapshot name." }
+      cli_switch s_snap_restore_vm { long = "--vm"  value_name = "VM"  description = "Target a single VM; omit for the whole lab." }
+      code_example { lang = "console"  code = "vmlab snapshot restore clean --vm dc01" }
+    }
+    subcommand c_snap_list {
+      name = "list"
+      description = "List a VM's snapshots (name, taken_at, power_state)."
+      cli_arg a_snap_list_vm { name = "vm"  description = "VM name." }
+      code_example { lang = "console"  code = "vmlab snapshot list dc01" }
+    }
+    subcommand c_snap_delete {
+      name = "delete"
+      description = "Delete a VM's snapshot."
+      cli_arg a_snap_del_vm   { name = "vm"    description = "VM name." }
+      cli_arg a_snap_del_name { name = "name"  description = "Snapshot name." }
+      code_example { lang = "console"  code = "vmlab snapshot delete dc01 clean" }
+    }
+  }
+
+  // ---- Guest execution & scripting ----
+
+  subcommand c_exec {
+    name = "exec"
+    description = "Run a command in a guest via the guest agent and print its stdout/stderr."
+    cli_arg a_exec_vm  { name = "vm"   description = "VM name." }
+    cli_arg a_exec_cmd { name = "cmd"  description = "Command and arguments, after `--`."  variadic = true }
+    code_example { lang = "console"  code = "vmlab exec dc01 -- ipconfig /all" }
+  }
+
+  subcommand c_script {
+    name = "script"
+    description = "Run an ad-hoc wscript script against the running lab (entry point `fn main(lab: Lab)`)."
+    cli_arg a_script_file { name = "script.wscript"  description = "Path to the wscript file." }
+    code_example { lang = "console"  code = "vmlab script scripts/test.wscript" }
+  }
+
+  // ---- Console & logs ----
+
+  subcommand c_console {
+    name = "console"
+    description = "Launch a VNC viewer for a VM (host config `viewer` command), or forward VNC over localhost TCP."
+    cli_arg a_console_vm { name = "vm"  description = "VM name." }
+    cli_switch s_console_tcp { long = "--tcp"  description = "Forward VNC over a localhost TCP port instead of launching the viewer (WSL2 / remote viewers)." }
+    code_example { lang = "console"  code = "vmlab console dc01\nvmlab console dc01 --tcp" }
+  }
+
+  subcommand c_logs {
+    name = "logs"
+    description = "Print JSON-line logs: lab events, or one VM's QEMU/serial output."
+    cli_arg a_logs_target { name = "[lab/][vm]"  description = "Lab events (default) or a specific VM's logs."  required = false }
+    cli_switch s_logs_follow { long = "--follow"  short = "-f"  description = "Follow the log as it grows." }
+    cli_switch s_logs_lines  { long = "--lines"   short = "-n"  value_name = "N"  description = "Lines of history (default 100)." }
+    code_example { lang = "console"  code = "vmlab logs -f\nvmlab logs dc01 -n 50" }
+  }
+
+  // ---- Templates: store + builds + OCI ----
+
+  subcommand c_template {
+    name = "template"
+    description = "Build, manage, and distribute disk templates. Local refs are `<arch>/<name>[@<version>]`; remote refs are `host/repo:tag`."
+    subcommand c_tpl_build {
+      name = "build"
+      description = "Build the template {} blocks in a file (default ./vmlab.wcl). Name one to build just it."
+      cli_arg a_tpl_build_name { name = "name"  description = "A single template to build; omit to build all."  required = false }
+      cli_switch s_tpl_build_file { long = "--file"  short = "-f"  value_name = "FILE"  description = "WCL file containing the template {} blocks (default ./vmlab.wcl)." }
+      code_example { lang = "console"  code = "vmlab template build\nvmlab template build -f templates.wcl linux-modern" }
+    }
+    subcommand c_tpl_list {
+      name = "list"
+      description = "List templates in the store."
+      cli_switch s_tpl_list_json { long = "--json"  description = "Emit the full metadata array (ref, sizes in bytes, RFC 3339 created)." }
+      code_example { lang = "console"  code = "vmlab template list --json" }
+    }
+    subcommand c_tpl_rm {
+      name = "rm"
+      description = "Remove a template from the store. The exact version is required."
+      cli_arg a_tpl_rm_ref { name = "<arch>/<name>@<version>"  description = "Exact store ref including version." }
+      cli_switch s_tpl_rm_force { long = "--force"  description = "Remove even if linked clones back it." }
+      code_example { lang = "console"  code = "vmlab template rm x86_64/linux-modern@1.0" }
+    }
+    subcommand c_tpl_export {
+      name = "export"
+      description = "Export a stored template to a portable archive."
+      cli_arg a_tpl_export_ref { name = "<arch>/<name>[@<ver>]"  description = "Store ref to export." }
+      cli_arg a_tpl_export_out { name = "out.tar.zst"  description = "Output archive path." }
+      code_example { lang = "console"  code = "vmlab template export x86_64/linux-modern@1.0 linux.tar.zst" }
+    }
+    subcommand c_tpl_import {
+      name = "import"
+      description = "Import a template archive into the store."
+      cli_arg a_tpl_import_archive { name = "archive.tar.zst"  description = "Archive to import." }
+      cli_switch s_tpl_import_overwrite { long = "--overwrite"  description = "Replace an existing store entry." }
+      code_example { lang = "console"  code = "vmlab template import linux.tar.zst" }
+    }
+    subcommand c_tpl_login {
+      name = "login"
+      description = "Log in to an OCI registry (persists to ~/.docker/config.json; existing docker logins are reused)."
+      cli_arg a_tpl_login_reg { name = "registry"  description = "Registry host, e.g. ghcr.io." }
+      cli_switch s_tpl_login_user { long = "--user"  short = "-u"  value_name = "USER"  description = "Registry username." }
+      cli_switch s_tpl_login_pass { long = "--password"  short = "-p"  value_name = "TOKEN"  description = "Password or token." }
+      code_example { lang = "console"  code = "vmlab template login ghcr.io -u myuser -p <token>" }
+    }
+    subcommand c_tpl_push {
+      name = "push"
+      description = "Push a stored template to a registry as an OCI artifact (chunked, multi-arch capable)."
+      cli_arg a_tpl_push_local  { name = "<arch>/<name>[@<ver>]"  description = "Local store ref." }
+      cli_arg a_tpl_push_remote { name = "registry/repo:tag"  description = "Remote registry ref." }
+      code_example { lang = "console"  code = "vmlab template push x86_64/linux-modern@1.0 ghcr.io/owner/linux-modern:1.0" }
+    }
+    subcommand c_tpl_pull {
+      name = "pull"
+      description = "Pull a template from a registry into the store. --arch is required for multi-arch indexes."
+      cli_arg a_tpl_pull_remote { name = "registry/repo:tag"  description = "Remote registry ref." }
+      cli_switch s_tpl_pull_arch { long = "--arch"  value_name = "ARCH"  description = "Required when the remote is a multi-arch index." }
+      code_example { lang = "console"  code = "vmlab template pull ghcr.io/owner/linux-modern:1.0 --arch x86_64" }
+    }
+  }
+
+  // ---- Daemon (normally automatic) ----
+
+  subcommand c_daemon {
+    name = "daemon"
+    description = "Manage the supervisor daemon. It is auto-started by any other verb, so this is rarely needed."
+    subcommand c_daemon_start  { name = "start"   description = "Start the supervisor (auto-started by any other verb anyway)."  code_example { lang = "console"  code = "vmlab daemon start" } }
+    subcommand c_daemon_stop   { name = "stop"    description = "Stop the supervisor and all lab daemons."  code_example { lang = "console"  code = "vmlab daemon stop" } }
+    subcommand c_daemon_status { name = "status"  description = "Show supervisor version and running labs (name/state/pid/root)."  code_example { lang = "console"  code = "vmlab daemon status" } }
+  }
+}

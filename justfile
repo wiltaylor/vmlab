@@ -66,3 +66,33 @@ lab-destroy dir='examples/mixed-lab': release
 # Launch the winsrv-desktop example (opens the WS2025 guest window)
 [group('lab')]
 winsrv-desktop: (lab-up 'examples/winsrv-desktop')
+
+# The website + vmlab wskill are authored in wdoc and rendered by the `wcl` CLI.
+# Install it from https://wcl.dev (or `cargo install --git …/wcl wcl`).
+
+# Validate the vmlab wskill model and both projection templates
+[group('docs')]
+wskill-check:
+	wcl check docs/wskills/vmlab/wskill.wcl
+	wcl check docs/wskills/vmlab/wdoc/book/main.wcl
+	wcl check docs/wskills/vmlab/wdoc/skill/main.wcl
+
+# Build the documentation website to docs/_site (landing pages + embedded reference book)
+[group('docs')]
+docs-build: wskill-check
+	wcl wdoc build docs/main.wcl --out docs/_site
+
+# Serve the website locally with live reload
+[group('docs')]
+docs-serve:
+	wcl wdoc serve docs/main.wcl
+
+# Regenerate the Claude Code skill at .claude/skills/vmlab from the wskill (single source)
+[group('docs')]
+skill-build: wskill-check
+	wcl wdoc skill docs/wskills/vmlab/wdoc/skill/main.wcl --out .claude/skills/vmlab
+
+# Remove generated site + wskill projections
+[group('docs')]
+docs-clean:
+	rm -rf docs/_site docs/wskills/vmlab/out

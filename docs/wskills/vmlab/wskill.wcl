@@ -1,0 +1,106 @@
+// vmlab — wskill root document.
+//
+// A complete reference for vmlab, the declarative QEMU/KVM lab orchestrator.
+// `wcl check wskill.wcl` validates the whole model; the wdoc template sets in
+// wdoc/ project it into the website book (wdoc/book) and the Claude Code skill
+// (wdoc/skill). The book is also embedded in the vmlab website via docs/main.wcl.
+
+import <wdoc.wcl>
+import "./schema/base.wcl"
+import "./schema/extensions.wcl"
+import "./schema/cli.wcl"               // opt-in: map the vmlab CLI as data
+
+// Data — reference units, glossary, examples and processes.
+import "./data/reference/concepts.wcl"
+import "./data/reference/entities.wcl"
+import "./data/reference/facts.wcl"
+import "./data/reference/glossary.wcl"
+import "./data/reference/examples.wcl"
+import "./data/reference/indexes.wcl"
+import "./data/reference/cli.wcl"
+import "./data/processes/processes.wcl"
+
+schema_version = "1.1.0"
+
+topic vmlab {
+  name    = "vmlab"
+  summary = "A declarative QEMU/KVM VM-lab orchestrator: labs and virtual networks declared in WCL, reusable disk templates built locally or distributed over OCI registries, and guest automation written in wscript."
+  version = "1.0"
+  description = <<END
+vmlab orchestrates single-host virtual-machine labs. A **lab** — a set of VMs plus
+the virtual networks that connect them — is declared in **WCL** (`vmlab.wcl`).
+Reusable disk **templates** are built from installer media and either kept in a
+local store or pushed to and pulled from any OCI registry. Guest automation —
+power control, command execution, keystrokes, screen matching and OCR — is written
+in **wscript** provision scripts and event handlers. A two-tier daemon (the
+supervisor `vmlabd` plus one daemon per running lab) is auto-started by the CLI;
+the network fabric is entirely userspace, so vmlab runs unprivileged in containers
+and on WSL2 with only `/dev/kvm`.
+END
+  tags = ["vmlab", "qemu", "kvm", "virtualization", "lab", "wcl", "wscript", "oci"]
+  created    = "2026-06-21"
+  maintainer = "ai@wiltaylor.dev"
+}
+
+// Skill-projection config (→ SKILL.md frontmatter). No bundled artifacts. The skill
+// block kind is `wcl.wskill::skill` (the base schema's namespace), not the topic's.
+wcl.wskill::skill {
+  summary {
+    overview = [
+      "vmlab orchestrates single-host VM labs: labs (VMs + virtual networks) are declared in WCL (`vmlab.wcl`), disk templates are built and stored locally or distributed via OCI registries, and automation is written in wscript scripts that drive guests (power, exec, keystrokes, screen matching, OCR).",
+      "A two-tier daemon (supervisor `vmlabd` + one daemon per lab) is auto-started by the CLI. This skill captures the full reference as data; `docs/vmlab-prd.md` is the binding spec if anything here disagrees.",
+    ]
+  }
+  skill_param "$ARGUMENTS" {
+    description = "The vmlab topic, CLI subcommand, WCL attribute, or wscript API method to look up."
+    value       = "Take it from the user's request. If empty, summarise the reference and ask what they need."
+  }
+  skill_boundary {
+    always = [
+      "Run `vmlab validate` after editing `vmlab.wcl` and before `vmlab up`.",
+      "For multi-step guest automation, write a wscript script (`vmlab script x.wscript`) instead of chaining many `vmlab exec` calls.",
+      "Cite the exact reference page when answering.",
+    ]
+    ask = [
+      "Which lab or template is meant when multiple `vmlab.wcl` files or store versions are plausible targets.",
+    ]
+    never = [
+      "Run `vmlab destroy` or `vmlab template rm` without explicit user say-so — both delete state (clones / store images).",
+      "Invent WCL attributes or wscript functions: everything that exists is in the reference; if it's not there, check `src/config/schema.wcl` or `src/scripting/mod.rs` before using it.",
+    ]
+  }
+}
+
+// ---- Sources (update-workflow metadata only) ----
+
+source vmlab_prd {
+  kind         = "docs"
+  locator      = "docs/vmlab-prd.md"
+  covers       = "The binding product requirements: the source of truth for design and scope (sections §N are referenced throughout the code)."
+  last_checked = "2026-06-21"
+  reflects_version = "1.0"
+}
+
+source vmlab_repo {
+  kind         = "repo"
+  locator      = "/home/wil/dev/vmlab"
+  covers       = "Source of truth for behaviour: src/config/schema.wcl (WCL schema), src/scripting/ (wscript host API), src/cli/, src/template/, src/profiles/shipped.wcl, examples/."
+  last_checked = "2026-06-21"
+  reflects_version = "1.0"
+}
+
+source vmlab_cli_help {
+  kind         = "cli"
+  locator      = "vmlab --help"
+  covers       = "Subcommand help text for the full verb surface (lifecycle, vm, snapshot, exec, script, console, logs, template, daemon)."
+  last_checked = "2026-06-21"
+  reflects_version = "1.0"
+}
+
+// ---- Cross-references to other wskills ----
+
+wskill_ref wcl {
+  name     = "wcl"
+  relation = "labs and templates are declared in WCL; this skill documents the vmlab schema, not the language itself"
+  status   = "exists"
+}

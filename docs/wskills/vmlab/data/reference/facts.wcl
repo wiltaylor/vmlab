@@ -1,0 +1,129 @@
+// Facts — titled containers of vmlab reference data (value tables). Ported from
+// host-config (profiles, paths), lab-config (events, validate checks), wscript-api
+// (key chords) and oci (artifact model), cross-checked against src/.
+
+fact profiles_table {
+  title    = "Shipped guest OS profiles"
+  related  = [profiles, vms, templates]
+  audience = :both
+  body {
+    p "Hardware defaults selected with `profile = \"...\"`. Precedence is **VM block > template metadata > profile > defaults**. Override or extend by dropping `*.wcl` into `~/.config/vmlab/profiles/`."
+    table {
+      header = ["Profile", "Machine", "Firmware", "Secure boot", "TPM", "Disk bus", "NIC", "Display", "CPUs/Mem"]
+      rows = [
+        ["`windows-11`", "q35", "ovmf", "yes", "yes", "virtio", "virtio-net-pci", "qxl", "4 / 8G"],
+        ["`windows-server`", "q35", "ovmf", "no", "yes", "virtio", "virtio-net-pci", "qxl", "4 / 8G"],
+        ["`windows-legacy`", "pc", "seabios", "no", "no", "ide", "e1000", "std", "2 / 2G"],
+        ["`linux-modern`", "q35", "ovmf", "no", "no", "virtio", "virtio-net-pci", "virtio-gpu", "2 / 4G"],
+        ["`linux-generic`", "q35", "seabios", "no", "no", "virtio", "virtio-net-pci", "std", "2 / 2G"],
+        ["`custom`", "—", "—", "—", "—", "—", "—", "—", "nothing assumed; supply everything via attributes + `qemu_args`"],
+      ]
+    }
+  }
+}
+
+fact paths_table {
+  title    = "Filesystem layout"
+  related  = [host_config, template_store, dot_vmlab]
+  audience = :both
+  body {
+    p "All XDG paths respect their environment variables."
+    table {
+      header = ["Path", "Contents"]
+      rows = [
+        ["`<labdir>/vmlab.wcl`", "Lab definition — found by walking up from cwd"],
+        ["`<labdir>/.vmlab/`", "Lab-local working data: linked clones, snapshots, built media, screenshots (gitignore it)"],
+        ["`~/.local/share/vmlab/templates/<arch>/<name>/<version>/`", "Template store (`disk.qcow2` + `template.wcl`)"],
+        ["`~/.cache/vmlab/artefacts/`", "Downloaded ISO/qcow2 + built-media cache (content-addressed)"],
+        ["`~/.local/state/vmlab/`", "Daemon state + logs (`vmlabd.log`, per-lab/per-VM JSON-line logs)"],
+        ["`~/.config/vmlab/config.wcl`", "Host config (optional)"],
+        ["`~/.config/vmlab/profiles/*.wcl`", "User profile overrides/additions"],
+        ["`$XDG_RUNTIME_DIR/vmlab/vmlabd.sock`", "Supervisor socket (fallback `/tmp/vmlab-<uid>/`)"],
+        ["`$XDG_RUNTIME_DIR/vmlab/labs/<lab>/control.sock`", "Lab daemon socket (+ per-VM QMP/agent/NIC/VNC sockets beside it)"],
+      ]
+    }
+  }
+}
+
+fact events {
+  title    = "Lifecycle events"
+  related  = [provisions, event_type]
+  audience = :both
+  body {
+    p "Events fire `on \"<event>\" {}` handlers and arrive in `fn handle(event: Event, lab: Lab)`. Handler failures are logged, never fatal."
+    table {
+      header = ["Event", "Meaning"]
+      rows = [
+        ["`vm.starting`", "A VM has begun booting"],
+        ["`vm.ready`", "The guest agent is responding"],
+        ["`vm.stopped`", "A VM powered off cleanly"],
+        ["`vm.crashed`", "A VM died unexpectedly (includes closing a `gui` window)"],
+        ["`lab.up`", "The lab finished coming up"],
+        ["`lab.down`", "The lab stopped"],
+        ["`snapshot.created`", "A snapshot was taken"],
+        ["`snapshot.restored`", "A snapshot was restored"],
+        ["`template.built`", "A template build sealed into the store"],
+        ["`lab.daemon_crashed`", "A lab daemon died (no auto-restart)"],
+        ["`host.disk_low`", "Free disk fell below `disk_low_percent`"],
+      ]
+    }
+  }
+}
+
+fact key_chords {
+  title    = "Keyboard chord names"
+  related  = [vm_api]
+  audience = :both
+  body {
+    p "`vm.send_keys(chord)` takes `-`-separated, case-insensitive QMP key names with aliases:"
+    code "text" { source = <<'SRC'
+ctrl alt shift win/super/meta enter/return esc del space tab backspace
+up down left right home end pgup/pageup pgdn/pagedown insert menu print
+pause caps_lock num_lock scroll_lock f1..f12 a-z 0-9
+SRC
+    }
+    p "Examples: `\"ctrl-alt-del\"`, `\"enter\"`, `\"shift-f5\"`. `vm.type_text` is US-ASCII only (`\\n`→enter, `\\t`→tab)."
+  }
+}
+
+fact validate_checks {
+  title    = "What `vmlab validate` checks"
+  related  = [labs, vms, provisions]
+  audience = :both
+  body {
+    p "`vmlab validate` performs schema + semantic checks with no side effects. It verifies:"
+    table {
+      header = ["Check", "Detail"]
+      rows = [
+        ["WCL schema", "The file conforms to the vmlab schema"],
+        ["Template refs", "Exist in the store, or a registry ref is given with explicit `arch`"],
+        ["NIC segments", "Every NIC's segment is declared"],
+        ["Static IPs", "Inside the declared subnet; no duplicate static IPs or MACs"],
+        ["Dependencies", "No `depends_on` cycles"],
+        ["Scripts", "Provision/handler files exist AND compile (full wscript type-check)"],
+        ["Scratch VMs", "Have `arch` + `profile` + `disk`"],
+      ]
+    }
+  }
+}
+
+fact oci_artifact {
+  title    = "OCI artifact model"
+  related  = [oci, templates]
+  audience = :both
+  body {
+    p "What a pushed template actually is in the registry:"
+    table {
+      header = ["Aspect", "Value"]
+      rows = [
+        ["Artifact type", "`application/vnd.vmlab.template.v1` (frozen; prevents `docker run` misuse)"],
+        ["Config blob", "`application/vnd.vmlab.template.config.v1+json` (template metadata)"],
+        ["Layers", "The qcow2 chunked into fixed-size zstd layers (`application/vnd.vmlab.template.chunk.v1+zstd`)"],
+        ["Default chunk size", "**512 MiB** (clears GHCR's 10-min per-upload timeout); set via `oci_chunk_size` in host config"],
+        ["Annotations", "`vnd.vmlab.template.*` record chunk count/size, total size, and whole-image digest"],
+        ["Integrity", "Pull reassembles chunks in order and verifies the whole-image SHA-256 before installing"],
+        ["Multi-arch", "A standard OCI image index keyed by platform arch; push the same name per arch"],
+      ]
+    }
+  }
+}

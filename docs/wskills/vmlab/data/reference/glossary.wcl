@@ -1,0 +1,107 @@
+// Glossary — vmlab vocabulary. Ids are prefixed `g_` to stay globally unique
+// across this wskill's units.
+
+term g_lab {
+  term       = "lab"
+  definition = "A set of VMs plus the virtual networks connecting them, declared in a `lab {}` block in `vmlab.wcl`."
+  aliases    = []
+  audience   = :both
+}
+
+term g_segment {
+  term       = "segment"
+  definition = "A virtual layer-2 switch. The lab daemon supplies DHCP, DNS, NAT, routing and L3 filtering for it in userspace."
+  aliases    = ["network segment"]
+  audience   = :both
+}
+
+term g_template {
+  term       = "template"
+  definition = "A sealed, read-only qcow2 disk image in the store, referenced by `<arch>/<name>[@<version>]`. Labs boot linked clones of it."
+  aliases    = []
+  audience   = :both
+}
+
+term g_linked_clone {
+  term       = "linked clone"
+  definition = "A copy-on-write qcow2 overlay a lab VM boots, backed by a template. The template is never written to."
+  aliases    = ["clone"]
+  audience   = :both
+}
+
+term g_store {
+  term       = "store"
+  definition = "The local template store at `~/.local/share/vmlab/templates/`. Writes are serialised by the supervisor."
+  aliases    = ["template store"]
+  audience   = :both
+}
+
+term g_provision {
+  term       = "provision"
+  definition = "A wscript script run on `vmlab up` (and during template builds) to set a guest up. A failure fails `vmlab up`."
+  aliases    = ["provision script"]
+  audience   = :both
+}
+
+term g_handler {
+  term       = "event handler"
+  definition = "A wscript script bound with `on \"event\" {}` that reacts to a lifecycle event via `fn handle(event, lab)`. Failures are logged, never fatal."
+  aliases    = ["handler"]
+  audience   = :both
+}
+
+term g_supervisor {
+  term       = "supervisor"
+  definition = "The per-user daemon `vmlabd`, auto-started by the CLI. Owns the lab registry, global segments, store writes and host watchdogs."
+  aliases    = ["vmlabd"]
+  audience   = :both
+}
+
+term g_lab_daemon {
+  term       = "lab daemon"
+  definition = "The per-lab daemon spawned by the supervisor on `vmlab up`. Owns QEMU, the network fabric, snapshots and the wscript runtime."
+  aliases    = []
+  audience   = :both
+}
+
+term g_profile {
+  term       = "profile"
+  definition = "A named set of hardware defaults (machine, firmware, TPM, disk bus, NIC, display, CPUs/memory) chosen with `profile = \"...\"`."
+  aliases    = ["guest OS profile"]
+  audience   = :both
+}
+
+term g_provision_scope {
+  term       = "scoped provision"
+  definition = "A `provision \"x\" { vms = [...] }`: it runs against those VMs and gates `depends_on` on them, so dependents wait for it."
+  aliases    = []
+  audience   = :both
+}
+
+term g_scratch {
+  term       = "scratch VM"
+  definition = "A VM booted from a blank disk (`template = \"scratch\"`) with no template, requiring explicit `arch`, `profile` and `disk`."
+  aliases    = []
+  audience   = :both
+}
+
+term g_oci_artifact {
+  term       = "OCI artifact"
+  definition = "How a template is stored in a registry: a non-runnable artifact (frozen media type) whose qcow2 is chunked into zstd layers."
+  aliases    = []
+  audience   = :both
+}
+
+term g_wscript {
+  term       = "wscript"
+  definition = "vmlab's statically typed, Rust-flavoured scripting language for guest automation. Compiled and type-checked at `vmlab validate` time."
+  aliases    = []
+  audience   = :both
+}
+
+term g_guest_agent {
+  term       = "guest agent"
+  definition = "The QEMU guest agent running inside a VM. `vm.is_ready()` / `vm.wait_ready()` test it; `vm.exec` / `copy_to` / `copy_from` use it."
+  aliases    = ["QEMU guest agent"]
+  audience   = :both
+}

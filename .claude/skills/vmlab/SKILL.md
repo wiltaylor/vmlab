@@ -1,63 +1,72 @@
 ---
 name: vmlab
-description: Using vmlab, the declarative QEMU/KVM lab orchestrator built in this repo. Load when writing or editing vmlab.wcl lab/template definitions, running vmlab CLI commands, writing wscript provision/handler scripts, building templates, pushing/pulling templates to OCI registries, configuring lab networking, or running vmlab in a container.
-user-invocable: false
+description: "Reference and processes for vmlab. A declarative QEMU/KVM VM-lab orchestrator: labs and virtual networks declared in WCL, reusable disk templates built locally or distributed over OCI registries, and guest automation written in wscript. Use when working with vmlab or answering questions about it."
+wskill_schema_version: 1.1.0
+allowed-tools: []
+disallowed-tools: []
+disable-model-invocation: false
 ---
 
-<overview>
-vmlab orchestrates single-host VM labs: labs (VMs + virtual networks) are
-declared in WCL (`vmlab.wcl`), reusable disk templates are built and stored
-locally or distributed via OCI registries, and automation is written in wscript
-scripts that drive guests (power, exec, keystrokes, screen matching, OCR).
-Two-tier daemon (supervisor `vmlabd` + one daemon per lab), auto-started by
-the CLI. This skill is a usage reference; `docs/vmlab-prd.md` is the binding
-spec if anything here disagrees.
-</overview>
+# vmlab
 
-<variables>
-- `${CLAUDE_SKILL_DIR}`: Path to this skill's directory.
-</variables>
+A declarative QEMU/KVM VM-lab orchestrator: labs and virtual networks declared in WCL, reusable disk templates built locally or distributed over OCI registries, and guest automation written in wscript.
 
-<routing>
-Read ONLY the reference file(s) the task needs:
+**Upstream version:** `1.0`. If the real upstream has moved past this, the skill may be stale — bump `topic.version` and re-verify (see the update workflow).
 
-| Task | Read |
-|---|---|
-| Run/choose CLI commands (lifecycle, snapshots, logs, exec, console) | `${CLAUDE_SKILL_DIR}/reference/cli.md` |
-| Write/edit a lab definition (`lab {}` — VMs, segments, NICs, shares, handlers) | `${CLAUDE_SKILL_DIR}/reference/lab-config.md` |
-| Build a template (`template {}` blocks, sources, store, media) | `${CLAUDE_SKILL_DIR}/reference/templates.md` |
-| Push/pull templates to an OCI registry, registry refs in labs | `${CLAUDE_SKILL_DIR}/reference/oci.md` |
-| Write a wscript provision/handler script — vmlab API (Lab/Vm/Segment) | `${CLAUDE_SKILL_DIR}/reference/wscript-api.md` |
-| wscript language syntax itself (types, match, Result, containers) | `${CLAUDE_SKILL_DIR}/reference/wscript-language.md` |
-| Run vmlab in docker/podman, WSL2 hosts | `${CLAUDE_SKILL_DIR}/reference/container.md` |
-| Host config, profiles, file paths, daemon model | `${CLAUDE_SKILL_DIR}/reference/host-config.md` |
-</routing>
+vmlab orchestrates single-host VM labs: labs (VMs + virtual networks) are declared in WCL (`vmlab.wcl`), disk templates are built and stored locally or distributed via OCI registries, and automation is written in wscript scripts that drive guests (power, exec, keystrokes, screen matching, OCR).
 
-<golden-path>
-```sh
-vmlab validate   # schema + semantic checks, no side effects — always after editing WCL
-vmlab up         # clone, boot, run provision scripts
-vmlab status     # VM/segment state, IPs, ready flags
-vmlab down       # graceful stop; clones retained (destroy deletes them)
-```
-A worked example lab lives at `examples/ad-lab/` (lab WCL + wscript scripts).
-</golden-path>
+A two-tier daemon (supervisor `vmlabd` + one daemon per lab) is auto-started by the CLI. This skill captures the full reference as data; `docs/vmlab-prd.md` is the binding spec if anything here disagrees.
 
-<boundaries>
-<always>
+## Parameters
+
+Values to pass when invoking this skill — reference them as `$ARGUMENTS`, `$1`, `$2`, … in the prompt.
+
+| Parameter | Description | How to determine the value |
+| --- | --- | --- |
+| $ARGUMENTS | The vmlab topic, CLI subcommand, WCL attribute, or wscript API method to look up. | Take it from the user's request. If empty, summarise the reference and ask what they need. |
+
+<Boundary>
+
+**Always:**
+
 - Run `vmlab validate` after editing `vmlab.wcl` and before `vmlab up`.
-- For multi-step guest automation, write a wscript script (`vmlab run x.wscript`)
-  instead of chaining many `vmlab exec` calls.
-</always>
-<ask>
-- Which lab or template is meant when multiple `vmlab.wcl` files or store
-  versions are plausible targets.
-</ask>
-<never>
-- Run `vmlab destroy` or `vmlab template rm` without explicit user say-so —
-  both delete state (clones / store images).
-- Invent WCL attributes or wscript functions: everything that exists is in the
-  reference files; if it's not there, check `src/config/schema.wcl` or
-  `src/scripting/mod.rs` before using it.
-</never>
-</boundaries>
+
+- For multi-step guest automation, write a wscript script (`vmlab script x.wscript`) instead of chaining many `vmlab exec` calls.
+
+- Cite the exact reference page when answering.
+
+**Ask first:**
+
+- Which lab or template is meant when multiple `vmlab.wcl` files or store versions are plausible targets.
+
+**Never:**
+
+- Run `vmlab destroy` or `vmlab template rm` without explicit user say-so — both delete state (clones / store images).
+
+- Invent WCL attributes or wscript functions: everything that exists is in the reference; if it's not there, check `src/config/schema.wcl` or `src/scripting/mod.rs` before using it.
+
+</Boundary>
+
+## Reference
+
+- [Labs & networking](references/index_ix_labs.md) — Declare VMs and the virtual networks that connect them.
+
+- [Templates & distribution](references/index_ix_templates.md) — Build reusable disk images and move them between machines.
+
+- [Automation (wscript)](references/index_ix_automation.md) — Drive guests with wscript provision scripts and event handlers.
+
+- [Operations & hosting](references/index_ix_operations.md) — Run vmlab: the CLI, daemons, host config, profiles, containers and WSL2.
+
+- [CLI reference](references/cli_ref.md) — every `vmlab` subcommand, its arguments and switches.
+
+- [Concepts](references/concepts_ref.md) — core ideas, one page each.
+
+- [Entities](references/entities_ref.md) — concrete things in the topic.
+
+- [Facts](references/facts_ref.md) — value tables and constants.
+
+- [Processes](references/processes_ref.md) — task runbooks.
+
+- [Glossary](references/glossary_ref.md) — terms and definitions.
+
+- [Related skills](references/related_ref.md) — cross-references to other wskills.
