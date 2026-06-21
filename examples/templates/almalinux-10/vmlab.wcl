@@ -29,5 +29,5 @@ template "almalinux-10" {
   media { kind = "iso" from = "./cloudinit/" label = "CIDATA" }
   nic { nat = true }
 
-  provision "scripts/install.wisp" { }
+  provision "scripts/install.wscript" { }
 }

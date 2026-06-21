@@ -1,6 +1,6 @@
-//! The wisp scripting surface (PRD §10): vmlab's host module exposing
+//! The wscript scripting surface (PRD §10): vmlab's host module exposing
 //! lab/VM/segment handles to provision scripts, event handlers, and ad-hoc
-//! runs. Scripts are daemon-unaware; the wisp VM is synchronous, so scripts
+//! runs. Scripts are daemon-unaware; the wscript VM is synchronous, so scripts
 //! execute on blocking threads and host methods bridge into the lab
 //! daemon's tokio runtime via `Handle::block_on`.
 
@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use wisp::{Context, Module, Script};
+use wscript::{Context, Module, Script};
 
 use crate::labd::lab::LabRuntime;
 use crate::labd::vm::{PowerState, VmInstance};
@@ -697,7 +697,7 @@ pub fn lab_module() -> Module {
     m
 }
 
-/// Build the full wisp context for compiling and running lab scripts.
+/// Build the full wscript context for compiling and running lab scripts.
 pub fn context() -> Context {
     Context::new()
         .module(lab_module())
@@ -710,7 +710,7 @@ pub fn context() -> Context {
 pub fn check_script_source(source: &str) -> Result<(), String> {
     match context().compile(source) {
         Ok(_) => Ok(()),
-        Err(wisp::Error::Compile(diags)) => {
+        Err(wscript::Error::Compile(diags)) => {
             let msgs: Vec<String> = diags.iter().map(runner::render_diag).collect();
             Err(msgs.join("; "))
         }
@@ -718,7 +718,7 @@ pub fn check_script_source(source: &str) -> Result<(), String> {
     }
 }
 
-/// Write the `.wispi` interface file for LSP support (PRD §10).
+/// Write the `.wscripti` interface file for LSP support (PRD §10).
 pub fn write_interface(path: &std::path::Path) -> std::io::Result<()> {
     context().write_interface(path)
 }
@@ -815,7 +815,7 @@ fn handle(event: Event, lab: Lab) {
     #[test]
     fn interface_file_generates() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("vmlab.wispi");
+        let path = tmp.path().join("vmlab.wscripti");
         write_interface(&path).unwrap();
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("mod vmlab"), "{content}");
@@ -840,7 +840,7 @@ mod example_tests {
                 let path = entry.unwrap().path();
                 if path.is_dir() {
                     stack.push(path);
-                } else if path.extension().is_some_and(|e| e == "wisp") {
+                } else if path.extension().is_some_and(|e| e == "wscript") {
                     let src = std::fs::read_to_string(&path)
                         .unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
                     check_script_source(&src).unwrap_or_else(|e| panic!("{}: {e}", path.display()));

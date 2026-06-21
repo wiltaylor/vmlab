@@ -8,7 +8,7 @@ use miette::NamedSource;
 use crate::config::{self, ConfigErrors, ValidationContext};
 
 /// Real validation context: consults the on-disk template store and the
-/// profile set. Script compile checking is wired to the wisp host module.
+/// profile set. Script compile checking is wired to the wscript host module.
 pub struct HostContext {
     profiles: crate::profiles::ProfileSet,
 }

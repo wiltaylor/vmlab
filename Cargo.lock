@@ -2150,7 +2150,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wcl_lang",
- "wisp",
+ "wscript",
  "zstd",
 ]
 
@@ -2562,61 +2562,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "wisp"
-version = "0.1.0"
-source = "git+https://github.com/wiltaylor/wisp.git?rev=29405c9d519b3e921202833b1ecdb9da9aaf332e#29405c9d519b3e921202833b1ecdb9da9aaf332e"
-dependencies = [
- "wisp-compiler",
- "wisp-core",
- "wisp-macros",
- "wisp-std",
- "wisp-vm",
-]
-
-[[package]]
-name = "wisp-compiler"
-version = "0.1.0"
-source = "git+https://github.com/wiltaylor/wisp.git?rev=29405c9d519b3e921202833b1ecdb9da9aaf332e#29405c9d519b3e921202833b1ecdb9da9aaf332e"
-dependencies = [
- "wisp-core",
-]
-
-[[package]]
-name = "wisp-core"
-version = "0.1.0"
-source = "git+https://github.com/wiltaylor/wisp.git?rev=29405c9d519b3e921202833b1ecdb9da9aaf332e#29405c9d519b3e921202833b1ecdb9da9aaf332e"
-
-[[package]]
-name = "wisp-macros"
-version = "0.1.0"
-source = "git+https://github.com/wiltaylor/wisp.git?rev=29405c9d519b3e921202833b1ecdb9da9aaf332e#29405c9d519b3e921202833b1ecdb9da9aaf332e"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "wisp-std"
-version = "0.1.0"
-source = "git+https://github.com/wiltaylor/wisp.git?rev=29405c9d519b3e921202833b1ecdb9da9aaf332e#29405c9d519b3e921202833b1ecdb9da9aaf332e"
-dependencies = [
- "quick-xml",
- "serde_json",
- "toml",
- "wisp-core",
- "wisp-macros",
-]
-
-[[package]]
-name = "wisp-vm"
-version = "0.1.0"
-source = "git+https://github.com/wiltaylor/wisp.git?rev=29405c9d519b3e921202833b1ecdb9da9aaf332e#29405c9d519b3e921202833b1ecdb9da9aaf332e"
-dependencies = [
- "wisp-core",
-]
-
-[[package]]
 name = "wit-bindgen"
 version = "0.51.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2715,6 +2660,61 @@ name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
+
+[[package]]
+name = "wscript"
+version = "0.1.0"
+source = "git+https://github.com/Configweave/wscript.git?rev=fcd51236239225ea3e89a82fec44d30f7b871426#fcd51236239225ea3e89a82fec44d30f7b871426"
+dependencies = [
+ "wscript-compiler",
+ "wscript-core",
+ "wscript-macros",
+ "wscript-std",
+ "wscript-vm",
+]
+
+[[package]]
+name = "wscript-compiler"
+version = "0.1.0"
+source = "git+https://github.com/Configweave/wscript.git?rev=fcd51236239225ea3e89a82fec44d30f7b871426#fcd51236239225ea3e89a82fec44d30f7b871426"
+dependencies = [
+ "wscript-core",
+]
+
+[[package]]
+name = "wscript-core"
+version = "0.1.0"
+source = "git+https://github.com/Configweave/wscript.git?rev=fcd51236239225ea3e89a82fec44d30f7b871426#fcd51236239225ea3e89a82fec44d30f7b871426"
+
+[[package]]
+name = "wscript-macros"
+version = "0.1.0"
+source = "git+https://github.com/Configweave/wscript.git?rev=fcd51236239225ea3e89a82fec44d30f7b871426#fcd51236239225ea3e89a82fec44d30f7b871426"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "wscript-std"
+version = "0.1.0"
+source = "git+https://github.com/Configweave/wscript.git?rev=fcd51236239225ea3e89a82fec44d30f7b871426#fcd51236239225ea3e89a82fec44d30f7b871426"
+dependencies = [
+ "quick-xml",
+ "serde_json",
+ "toml",
+ "wscript-core",
+ "wscript-macros",
+]
+
+[[package]]
+name = "wscript-vm"
+version = "0.1.0"
+source = "git+https://github.com/Configweave/wscript.git?rev=fcd51236239225ea3e89a82fec44d30f7b871426#fcd51236239225ea3e89a82fec44d30f7b871426"
+dependencies = [
+ "wscript-core",
+]
 
 [[package]]
 name = "xattr"

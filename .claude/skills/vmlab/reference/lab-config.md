@@ -59,10 +59,10 @@ lab "ad-lab" {
     nic { nat = true }
   }
 
-  provision "scripts/setup.wisp" { vms = ["dc01"] }
+  provision "scripts/setup.wscript" { vms = ["dc01"] }
 
-  on "vm.crashed"    { run = "scripts/collect-dumps.wisp" }
-  on "host.disk_low" { run = "scripts/alert.wisp" }
+  on "vm.crashed"    { run = "scripts/collect-dumps.wscript" }
+  on "host.disk_low" { run = "scripts/alert.wscript" }
 }
 ```
 
@@ -145,11 +145,11 @@ script once to authenticate their own session.
 ## Provisions and event handlers
 
 ```wcl
-provision "scripts/setup.wisp" { }                  // run on `vmlab up`, in declaration order
-provision "scripts/join.wisp"  { vms = ["client01"] }  // scoped: gates depends_on on these VMs
+provision "scripts/setup.wscript" { }                  // run on `vmlab up`, in declaration order
+provision "scripts/join.wscript"  { vms = ["client01"] }  // scoped: gates depends_on on these VMs
 
-on "vm.crashed"    { run = "scripts/collect-dumps.wisp" }
-on "host.disk_low" { run = "scripts/alert.wisp" }
+on "vm.crashed"    { run = "scripts/collect-dumps.wscript" }
+on "host.disk_low" { run = "scripts/alert.wscript" }
 ```
 
 Events: `vm.starting`, `vm.ready`, `vm.stopped`, `vm.crashed`, `lab.up`,
@@ -162,7 +162,7 @@ handler failures are logged, never fatal.
 WCL schema; template refs exist in store (or registry ref + explicit
 `arch`); NIC segments are declared; static IPs inside the declared subnet;
 no duplicate static IPs/MACs; no `depends_on` cycles; provision/handler
-script files exist AND compile (full wisp type-check); scratch VMs have
+script files exist AND compile (full wscript type-check); scratch VMs have
 `arch` + `profile` + `disk`.
 
 Source of truth: PRD §5, §7.5, §8; `src/config/schema.wcl`;

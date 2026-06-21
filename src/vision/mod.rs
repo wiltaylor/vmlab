@@ -18,7 +18,7 @@ mod matching;
 mod ocr;
 mod screenshot;
 
-// The consumer (wisp scripting bridge) lands later in the buildout; until
+// The consumer (wscript scripting bridge) lands later in the buildout; until
 // then the re-exports are intentionally unused.
 #[allow(unused_imports)]
 pub use matching::{Match, MatchOptions, find_template};

@@ -74,16 +74,16 @@ pub enum Command {
         #[arg(long)]
         tcp: bool,
     },
-    /// Run an ad-hoc wisp script against the current lab
+    /// Run an ad-hoc wscript script against the current lab
     Script {
         /// Script path, relative to the lab root
         script: String,
     },
-    /// Internal: write the wisp interface file (LSP support for lab scripts)
+    /// Internal: write the wscript interface file (LSP support for lab scripts)
     #[command(hide = true)]
-    Wispi {
+    Wscripti {
         /// Output path
-        #[arg(default_value = "vmlab.wispi")]
+        #[arg(default_value = "vmlab.wscripti")]
         out: std::path::PathBuf,
     },
     /// Run a command in the guest via the agent
@@ -272,7 +272,7 @@ pub fn run() -> ExitCode {
         Command::Console { vm, tcp } => console::cmd_console(&vm, tcp),
         Command::Vncbridge { lab, vm } => console::run_bridge(lab, vm),
         Command::Script { script } => lab::cmd_run(&script),
-        Command::Wispi { out } => crate::scripting::write_interface(&out)
+        Command::Wscripti { out } => crate::scripting::write_interface(&out)
             .map_err(anyhow::Error::from)
             .map(|()| println!("wrote {}", out.display())),
         Command::Exec { vm, timeout, cmd } => lab::cmd_exec(&vm, timeout, cmd),

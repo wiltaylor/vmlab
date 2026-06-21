@@ -9,11 +9,11 @@ use super::model::*;
 use super::{Issue, IssueList};
 
 /// Host facilities the validator consults. The CLI wires the real template
-/// store and wisp compiler; tests substitute fakes.
+/// store and wscript compiler; tests substitute fakes.
 pub trait ValidationContext {
     fn template_exists(&self, arch: &str, name: &str, version: Option<&str>) -> bool;
     fn profile_exists(&self, name: &str) -> bool;
-    /// Compile-check a wisp script at an absolute path.
+    /// Compile-check a wscript script at an absolute path.
     fn check_script(&self, path: &Path) -> Result<(), String>;
 }
 
@@ -733,7 +733,7 @@ lab "l" {
     #[test]
     fn missing_script() {
         assert_err(
-            "import <vmlab.wcl>\nlab \"l\" { vm \"a\" { template = \"x86_64/t\" }\n  provision \"no/such/script.wisp\" { } }",
+            "import <vmlab.wcl>\nlab \"l\" { vm \"a\" { template = \"x86_64/t\" }\n  provision \"no/such/script.wscript\" { } }",
             "does not exist",
         );
     }
@@ -752,7 +752,7 @@ lab "l" {
     #[test]
     fn unknown_event() {
         assert_err(
-            "import <vmlab.wcl>\nlab \"l\" { vm \"a\" { template = \"x86_64/t\" }\n  on \"vm.exploded\" { run = \"x.wisp\" } }",
+            "import <vmlab.wcl>\nlab \"l\" { vm \"a\" { template = \"x86_64/t\" }\n  on \"vm.exploded\" { run = \"x.wscript\" } }",
             "unknown event",
         );
     }

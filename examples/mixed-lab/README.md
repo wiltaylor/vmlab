@@ -16,7 +16,7 @@ Run it:
 
 ```sh
 vmlab validate
-vmlab up                        # boots winsrv, then nix01; runs setup.wisp
+vmlab up                        # boots winsrv, then nix01; runs setup.wscript
 vmlab status                    # both ready: winsrv 10.70.0.10, nix01 leased
 curl http://localhost:18080      # nginx on nix01 through the segment forward
 vmlab down                      # clones retained; `vmlab destroy` deletes them

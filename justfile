@@ -36,7 +36,7 @@ fmt:
 [group('check')]
 check: lint fmt-check test
 
-# Context is the parent directory so the sibling WCL/wisp path deps are
+# Context is the parent directory so the sibling WCL/wscript path deps are
 # available to the build.
 # Build the official runtime container image (PRD §14)
 [group('build')]

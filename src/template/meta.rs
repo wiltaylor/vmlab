@@ -44,7 +44,7 @@ pub struct TemplateMeta {
     pub registry: Option<String>,
     /// Hex SHA-256 digest of `disk.qcow2`.
     pub sha256: Option<String>,
-    /// Embedded wisp script (full source text) run the first time a VM is
+    /// Embedded wscript script (full source text) run the first time a VM is
     /// instantiated from this template, before it is reported ready (PRD §6.1).
     pub first_boot_script: Option<String>,
 }

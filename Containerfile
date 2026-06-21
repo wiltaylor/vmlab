@@ -4,8 +4,8 @@
 # mode — `--device /dev/kvm` is the only host grant needed for acceleration
 # (without it, vmlab falls back to TCG with a loud warning).
 #
-# vmlab depends on the sibling WCL and wisp workspaces via path deps, so the
-# build context is the PARENT directory containing vmlab/, WCL/, and wisp/.
+# vmlab depends on the sibling WCL and wscript workspaces via path deps, so the
+# build context is the PARENT directory containing vmlab/, WCL/, and wscript/.
 #
 # Build:  docker build -t vmlab -f vmlab/Containerfile .      (run from ../)
 #    or:  just image                                          (from vmlab/)
@@ -19,7 +19,7 @@ WORKDIR /build
 # Bring in vmlab plus its sibling path dependencies.
 COPY vmlab ./vmlab
 COPY WCL ./WCL
-COPY wisp ./wisp
+COPY wscript ./wscript
 RUN cargo build --release --locked --manifest-path vmlab/Cargo.toml
 
 # ---- runtime ----------------------------------------------------------------

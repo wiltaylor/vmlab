@@ -1,4 +1,4 @@
 /target
 /.vmlab
-*.wispi
+*.wscripti
 examples/**/.vmlab/

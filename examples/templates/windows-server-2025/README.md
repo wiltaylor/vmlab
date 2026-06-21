@@ -11,7 +11,7 @@ vmlab template build     # ~30-45 minutes
 vmlab template list      # → x86_64/windows-server-2025@26100.1742
 ```
 
-What happens (`scripts/install.wisp` narrates it in the build log):
+What happens (`scripts/install.wscript` narrates it in the build log):
 
 1. The build VM boots the eval ISO; the script types through the
    "Press any key to boot from CD or DVD" prompt (and resets + retries if

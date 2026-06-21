@@ -1,6 +1,6 @@
 //! Script execution: provision scripts (`fn main(lab: Lab)`), event
 //! handlers (`fn handle(event: Event, lab: Lab)`), and ad-hoc `vmlab script`.
-//! The wisp VM is synchronous — scripts run on blocking threads; host
+//! The wscript VM is synchronous — scripts run on blocking threads; host
 //! methods bridge back into tokio via the runtime handle carried in each
 //! script object.
 
@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, anyhow};
-use wisp::Vm;
+use wscript::Vm;
 
 use super::{EventData, LabHandle, SegmentHandle};
 use crate::labd::lab::LabRuntime;
@@ -140,9 +140,9 @@ fn script_dir(script: &Path) -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("."))
 }
 
-fn compile_error(e: wisp::Error) -> String {
+fn compile_error(e: wscript::Error) -> String {
     match e {
-        wisp::Error::Compile(diags) => {
+        wscript::Error::Compile(diags) => {
             let msgs: Vec<String> = diags.iter().map(render_diag).collect();
             msgs.join("; ")
         }
@@ -150,19 +150,25 @@ fn compile_error(e: wisp::Error) -> String {
     }
 }
 
-pub(crate) fn render_diag(d: &wisp::Diagnostic) -> String {
+pub(crate) fn render_diag(d: &wscript::Diagnostic) -> String {
     match &d.help {
         Some(h) => format!("{} [{}] (help: {h})", d.message, d.code),
         None => format!("{} [{}]", d.message, d.code),
     }
 }
 
-fn run_error(e: wisp::Error) -> String {
+fn run_error(e: wscript::Error) -> String {
     match e {
-        wisp::Error::Runtime(r) => {
+        wscript::Error::Runtime(r) => {
             let mut s = r.message.clone();
             if !r.trace.is_empty() {
-                s.push_str(&format!(" (at {})", r.trace.join(" <- ")));
+                let chain = r
+                    .trace
+                    .iter()
+                    .map(|f| f.function.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" <- ");
+                s.push_str(&format!(" (at {chain})"));
             }
             s
         }
@@ -171,7 +177,7 @@ fn run_error(e: wisp::Error) -> String {
 }
 
 /// Runtime mutation of a segment's L3 rules and forwards (PRD §9.9), bridged
-/// from the wisp `Segment` handle into the lab daemon.
+/// from the wscript `Segment` handle into the lab daemon.
 impl SegmentHandle {
     fn with_services<T>(
         &self,

@@ -10,7 +10,7 @@ vmlab template build
 vmlab template list      # → x86_64/ubuntu-24.04@24.04.4
 ```
 
-What happens (`scripts/install.wisp` narrates it in the build log):
+What happens (`scripts/install.wscript` narrates it in the build log):
 
 1. The build VM boots the installer ISO with `cloudinit/` attached as a
    `CIDATA` volume (NoCloud datasource).

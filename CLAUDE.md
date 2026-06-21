@@ -31,8 +31,8 @@ PRD implemented (M1–M6). Module map under `src/`:
 - `proto/` — JSON-lines daemon wire protocol (client + server).
 - `supervisor/` — `vmlabd`: lab registry, global segments, watchdogs.
 - `labd/` — per-lab daemon: lifecycle, snapshots, network assembly, events,
-  SMB integration, the lab runtime the wisp host binds to.
-- `scripting/` — wisp host module (lab/VM/segment API), provisions, handlers.
+  SMB integration, the lab runtime the wscript host binds to.
+- `scripting/` — wscript host module (lab/VM/segment API), provisions, handlers.
 - `smb/` — bundled-smbd shared folders.
 - `oci/` — OCI registry push/pull (chunked, multi-arch).
 - `cli/` — the `vmlab` verb surface.

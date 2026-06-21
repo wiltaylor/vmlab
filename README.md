@@ -2,7 +2,7 @@
 
 A single-host virtual machine lab orchestrator. Define **labs** — named
 groups of VMs and virtual networks — declaratively in [WCL][wcl], build and
-manage reusable **templates**, and drive automation through [wisp][wisp]
+manage reusable **templates**, and drive automation through [wscript][wscript]
 scripts that interact with guests at every level: power state, snapshots,
 keystrokes and mouse input, screenshot capture with image matching and OCR,
 and command execution and file transfer via the QEMU guest agent.
@@ -22,10 +22,10 @@ Two-tier daemon system (PRD §3):
   host-level watchdogs, and an aggregated event stream.
 - **Lab daemon** — one per running lab, owning that lab's QEMU processes,
   QMP/agent channels, network fabric (a complete userspace switching / DHCP /
-  DNS / NAT / routing / filtering stack), snapshots, state, and the wisp
+  DNS / NAT / routing / filtering stack), snapshots, state, and the wscript
   runtime.
 
-The CLI is a client of both tiers. wisp scripts are written against a clean
+The CLI is a client of both tiers. wscript scripts are written against a clean
 lab/VM API and are never aware of the daemons.
 
 ## Quick start
@@ -57,10 +57,10 @@ Worked examples under `examples/`, all built and run end-to-end:
 
 - `templates/ubuntu-24.04/` — Ubuntu Server 24.04 template: ISO download +
   sha256 verify, cloud-init autoinstall via a CIDATA media block, OCR-driven
-  confirmation in wisp.
+  confirmation in wscript.
 - `templates/windows-server-2025/` — Windows Server 2025 (eval) template:
   fully unattended autounattend.xml install with virtio drivers, guest
-  agent on first logon, boot-prompt handling in wisp.
+  agent on first logon, boot-prompt handling in wscript.
 - `mixed-lab/` — a two-VM Windows + Linux lab using both templates:
   static IP, boot ordering, SMB share onto `S:`, host port-forward, and a
   provision script driving both guests.
@@ -82,7 +82,7 @@ Worked examples under `examples/`, all built and run end-to-end:
 | `vmlab exec [--timeout s] <vm> -- cmd` | Guest-agent exec |
 | `vmlab cp <src> <vm>:<dest>` | Copy a host file or directory tree into a guest |
 | `vmlab osinfo <vm>` | Guest OS identification (guest-get-osinfo) as JSON |
-| `vmlab script <script.wisp>` | Ad-hoc script against the current lab |
+| `vmlab script <script.wscript>` | Ad-hoc script against the current lab |
 | `vmlab logs [lab/][vm]` | Tail/dump JSON-line logs |
 | `vmlab template build / list / rm / export / import` | Template store |
 | `vmlab template push / pull / login` | OCI registry distribution |
@@ -90,8 +90,8 @@ Worked examples under `examples/`, all built and run end-to-end:
 
 ## Building
 
-This crate depends on the sibling [WCL][wcl] and [wisp][wisp] workspaces via
-path dependencies (`../WCL`, `../wisp`). [`just`][just] is the command runner:
+This crate depends on the sibling [WCL][wcl] and [wscript][wscript] workspaces via
+path dependencies (`../WCL`, `../wscript`). [`just`][just] is the command runner:
 
 ```sh
 just build    # cargo build
@@ -127,5 +127,5 @@ it vmlab falls back to TCG (slow but functional). No `--privileged`, no extra
 capabilities, no host network mode.
 
 [wcl]: https://github.com/wiltaylor/wcl
-[wisp]: https://github.com/wiltaylor/wisp
+[wscript]: https://github.com/Configweave/wscript
 [just]: https://github.com/casey/just

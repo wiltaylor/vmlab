@@ -1,10 +1,10 @@
 //! Template builds (PRD §6.1): create a working qcow2, boot it per the
-//! template's hardware, run wisp build provision scripts, seal, and move the
+//! template's hardware, run wscript build provision scripts, seal, and move the
 //! image + metadata into the store. A failed build leaves nothing behind.
 //!
 //! A build is modelled as a one-VM `scratch` lab whose primary disk is
 //! pre-seeded from the source, so it reuses the entire lab runtime
-//! (lifecycle, networking, the wisp build scripts). The build runs
+//! (lifecycle, networking, the wscript build scripts). The build runs
 //! in-process — no daemon — and seals by flattening the working disk into
 //! the store.
 
@@ -436,14 +436,14 @@ mod tests {
             "import <vmlab.wcl>\n",
             "template \"t\" { arch = \"x86_64\" version = \"1\"\n",
             "  source \"scratch\" { }\n",
-            "  first_boot = \"scripts/firstboot.wisp\"\n",
+            "  first_boot = \"scripts/firstboot.wscript\"\n",
             "}\n"
         ));
         assert_eq!(
             d.first_boot.as_deref(),
-            Some(Path::new("scripts/firstboot.wisp"))
+            Some(Path::new("scripts/firstboot.wscript"))
         );
         let wcl = synth_lab(&d, "build-t", "build", None, Path::new("/root")).unwrap();
-        assert!(!wcl.contains("firstboot.wisp"), "{wcl}");
+        assert!(!wcl.contains("firstboot.wscript"), "{wcl}");
     }
 }

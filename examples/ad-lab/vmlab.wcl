@@ -34,8 +34,8 @@ lab "ad-lab" {
     nic { nat = true }
   }
 
-  provision "scripts/setup.wisp" { vms = ["dc01"] }
+  provision "scripts/setup.wscript" { vms = ["dc01"] }
 
-  on "vm.crashed"    { run = "scripts/collect-dumps.wisp" }
-  on "host.disk_low" { run = "scripts/alert.wisp" }
+  on "vm.crashed"    { run = "scripts/collect-dumps.wscript" }
+  on "host.disk_low" { run = "scripts/alert.wscript" }
 }

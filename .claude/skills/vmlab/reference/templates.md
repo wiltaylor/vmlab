@@ -26,7 +26,7 @@ template "linux-modern" {
   media { kind = "iso" from = "./cloudinit/" label = "CIDATA" }   // built from folder, cached
   nic { nat = true }                                              // build VM network access
   disk "extra" { size = "10G" }                                   // extra disks during build
-  provision "scripts/install.wisp" { }                            // drives the installer
+  provision "scripts/install.wscript" { }                            // drives the installer
 }
 ```
 
@@ -45,8 +45,8 @@ source "scratch"  { }                                                  // blank 
 `vmlab template build` → resolve source (URL downloads cached +
 content-addressed under `~/.cache/vmlab/artefacts/`) → create working qcow2
 → synthesize a one-VM lab from the template definition → boot per the
-hardware profile → run provision scripts (full wisp API: keystrokes, screen
-matching, exec — see wisp-api.md; the script should install the QEMU guest
+hardware profile → run provision scripts (full wscript API: keystrokes, screen
+matching, exec — see wscript-api.md; the script should install the QEMU guest
 agent) → graceful shutdown → flatten → seal into the store. A failed build
 leaves nothing behind.
 

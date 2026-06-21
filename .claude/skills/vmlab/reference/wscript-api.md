@@ -1,16 +1,16 @@
-# vmlab wisp API reference (the `vmlab` module)
+# vmlab wscript API reference (the `vmlab` module)
 
 Every script starts with `use vmlab`. Scripts are synchronous; all blocking
 calls take timeouts and return `Result[..., string]`. Generate
-`vmlab.wispi` (`vmlab wispi`) for LSP support when editing scripts.
+`vmlab.wscripti` (`vmlab wscripti`) for LSP support when editing scripts.
 
 ## Entry points
 
 ```rust
-// Provision script (provision "x.wisp" {} in vmlab.wcl) and `vmlab run x.wisp`:
+// Provision script (provision "x.wscript" {} in vmlab.wcl) and `vmlab run x.wscript`:
 fn main(lab: Lab) { ... }       // an Err propagating out fails the provision run (and `vmlab up`)
 
-// Event handler (on "vm.crashed" { run = "x.wisp" }):
+// Event handler (on "vm.crashed" { run = "x.wscript" }):
 fn handle(event: Event, lab: Lab) { ... }   // failures logged, never fatal
 ```
 

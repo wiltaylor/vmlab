@@ -37,7 +37,7 @@ host {
   serialised template-store writes, host watchdogs, aggregated events.
 - **Lab daemon** — one per running lab, spawned by the supervisor on
   `vmlab up`, reaped on `down`/`destroy`. Owns QEMU processes, QMP/agent
-  channels, the userspace network fabric, snapshots, the wisp runtime.
+  channels, the userspace network fabric, snapshots, the wscript runtime.
 - If a lab daemon dies, the supervisor emits `lab.daemon_crashed` and marks
   the lab failed — **no auto-restart** (restart policy belongs to `on`
   handlers). Manual control: `vmlab daemon start|stop|status`.

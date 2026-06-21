@@ -2,15 +2,15 @@
 
 **Status:** Draft v1
 **Date:** 2026-06-12
-**Depends on:** WCL (spec complete, implemented), wisp (assumed complete before this PRD is executed)
+**Depends on:** WCL (spec complete, implemented), wscript (assumed complete before this PRD is executed)
 
 ---
 
 ## 1. Overview
 
-vmlab is a single-host virtual machine lab orchestrator. It defines **labs** — named groups of VMs and virtual networks — declaratively in WCL, builds and manages reusable **templates** (the Vagrant-box analogue), and drives lab automation through **wisp scripts** that can interact with guests at every level: power state, snapshots, keystrokes and mouse input, screenshot capture with image matching and OCR, and command execution and file transfer via the QEMU guest agent.
+vmlab is a single-host virtual machine lab orchestrator. It defines **labs** — named groups of VMs and virtual networks — declaratively in WCL, builds and manages reusable **templates** (the Vagrant-box analogue), and drives lab automation through **wscript scripts** that can interact with guests at every level: power state, snapshots, keystrokes and mouse input, screenshot capture with image matching and OCR, and command execution and file transfer via the QEMU guest agent.
 
-A two-tier daemon system owns all runtime state: a per-user **supervisor** manages lab lifecycle, the template store, and cross-lab/cross-host networking, and spawns one **lab daemon** per running lab that owns that lab's QEMU processes, network fabric, and state — so labs are fault- and contention-isolated from each other. The CLI is a client of both tiers; wisp scripts are written against a clean lab/VM API and are never aware of the daemons' existence.
+A two-tier daemon system owns all runtime state: a per-user **supervisor** manages lab lifecycle, the template store, and cross-lab/cross-host networking, and spawns one **lab daemon** per running lab that owns that lab's QEMU processes, network fabric, and state — so labs are fault- and contention-isolated from each other. The CLI is a client of both tiers; wscript scripts are written against a clean lab/VM API and are never aware of the daemons' existence.
 
 vmlab targets QEMU/KVM exclusively, driven directly over QMP — no libvirt. Hosts are Linux, with **WSL2 explicitly supported as a first-class host environment**, which constrains the networking design (see §9).
 
@@ -18,7 +18,7 @@ vmlab targets QEMU/KVM exclusively, driven directly over QMP — no libvirt. Hos
 
 - Reproducible multi-VM labs defined in a single `vmlab.wcl` file, validated by WCL schema before anything touches QEMU.
 - Template building with the same automation machinery used for provisioning — boot an installer ISO, drive it with keystrokes and screen matching, seal, store.
-- A scripting surface (wisp) rich enough to fully automate guests that have no automation hooks of their own — i.e. screen-driven automation as a first-class capability, not a fallback.
+- A scripting surface (wscript) rich enough to fully automate guests that have no automation hooks of their own — i.e. screen-driven automation as a first-class capability, not a fallback.
 - A self-contained virtual network stack — switching, DHCP, DNS, routing, NAT, port forwarding, traffic filtering and redirection — that requires no root privileges and no host network configuration, and works identically on bare Linux and WSL2.
 - Sensible zero-config defaults: a lab with no network declarations still gets working networking, addressing, and name resolution.
 
@@ -40,8 +40,8 @@ vmlab targets QEMU/KVM exclusively, driven directly over QMP — no libvirt. Hos
 | **Template** | A reusable, sealed base image (qcow2 + metadata) stored in the local template store, keyed by `arch + name + version`. The Vagrant-box analogue. |
 | **VM** | An instance in a lab, created as a linked clone (qcow2 backing file) of a template. Disposable by default. |
 | **Segment** | A named L2 network. Implemented as a virtual switch inside its owning daemon — the lab daemon for lab segments, the supervisor for global ones. Per-lab by default; declarable as `global` to span labs (and hosts). |
-| **Provision script** | A wisp script listed in `vmlab.wcl`, run during `vmlab up` after its VMs are ready. Receives a lab handle. |
-| **Handler** | A wisp function bound to a daemon event (lifecycle, error, disk-space) for a lab or VM. |
+| **Provision script** | A wscript script listed in `vmlab.wcl`, run during `vmlab up` after its VMs are ready. Receives a lab handle. |
+| **Handler** | A wscript function bound to a daemon event (lifecycle, error, disk-space) for a lab or VM. |
 | **Guest OS profile** | A named bundle of hardware defaults (firmware, machine type, devices) applied to a VM or template. |
 | **Ready** | A VM is *ready* when its QEMU guest agent responds. A lab is *up* when all VMs are ready and all provision scripts have completed. |
 
@@ -76,7 +76,7 @@ vmlab is a two-tier daemon system: one **supervisor** per user, one **lab daemon
 - **Supervisor (`vmlabd`).** One per user, auto-started by the CLI. Owns: spawning a lab daemon on `up` and reaping it on `down`/`destroy`; the registry of running labs (name → socket, pid, state); **global segments** (§9.2) — shared switches live here, with lab daemons attached as trunk ports; cross-host peering; serialised writes to the template store (pulls, builds, imports — so concurrent labs can't corrupt it; reads are lock-free); host-level watchdogs (`host.disk_low`); and an aggregated event stream across all labs. If a lab daemon dies unexpectedly, the supervisor detects it, emits `lab.daemon_crashed`, and marks the lab failed — it does not silently restart it.
 - **Lab daemon.** One per running lab, owning everything lab-scoped: that lab's QEMU processes, QMP and guest-agent channels, lab-local segments and their DHCP/DNS/routing/rules, clones and snapshots, lab state, and lab events (forwarded up to the supervisor's aggregate stream). A lab daemon's failure is contained to its lab; other labs and the supervisor are unaffected.
 - **CLI.** Connects to the supervisor for discovery and host-scoped verbs (template store, `status` across labs, daemon control), then talks **directly** to the relevant lab daemon's socket for lab-scoped operations — no proxying in the hot path.
-- **wisp runtime.** Executes **inside the lab daemon** — it must react to events and co-locating it with the lab's state and event stream keeps everything in one place. The script-facing contract is unchanged: scripts get the lab/VM API (§10) and remain daemon-unaware.
+- **wscript runtime.** Executes **inside the lab daemon** — it must react to events and co-locating it with the lab's state and event stream keeps everything in one place. The script-facing contract is unchanged: scripts get the lab/VM API (§10) and remain daemon-unaware.
 - **QEMU.** One process per VM, launched by its lab daemon with `-qmp`, a guest-agent virtio-serial channel, VNC display, and one stream-socket netdev per NIC into the lab daemon's switch.
 
 ### 3.1 Sockets and protocols
@@ -101,7 +101,7 @@ All XDG paths respect the corresponding environment variables.
 
 ## 5. Configuration model (`vmlab.wcl`)
 
-> **⚠ Binding note — syntax.** All WCL fragments in this document sketch *intent only*. The exact syntax — block forms, attribute names where they collide with WCL conventions, schema declarations — must follow the WCL spec and its native schema system. The implementer should treat the semantics described here as the contract and derive the surface from the WCL spec. The same applies to every wisp fragment: the API binds to the wisp spec's actual function/type/module syntax.
+> **⚠ Binding note — syntax.** All WCL fragments in this document sketch *intent only*. The exact syntax — block forms, attribute names where they collide with WCL conventions, schema declarations — must follow the WCL spec and its native schema system. The implementer should treat the semantics described here as the contract and derive the surface from the WCL spec. The same applies to every wscript fragment: the API binds to the wscript spec's actual function/type/module syntax.
 
 A lab file declares, at minimum, a lab name and one or more VMs. Everything else has defaults.
 
@@ -154,16 +154,16 @@ lab "ad-lab" {
     nic { segment = "dmz" }
   }
 
-  provision "scripts/setup.wisp" { }            # runs on `vmlab up`, in listed order
+  provision "scripts/setup.wscript" { }            # runs on `vmlab up`, in listed order
 
-  on "vm.crashed"    run "scripts/collect-dumps.wisp"
-  on "host.disk_low" run "scripts/alert.wisp"
+  on "vm.crashed"    run "scripts/collect-dumps.wscript"
+  on "host.disk_low" run "scripts/alert.wscript"
 }
 ```
 
 ### 5.1 Validation
 
-`vmlab validate` (and implicitly every other verb) evaluates the lab file against the vmlab WCL schema and fails before any side effect on errors including: unknown attributes, missing templates, undeclared segment references, static IPs outside their segment's subnet, duplicate static IPs/MACs, dependency cycles in `depends_on`, missing script files, archless or malformed template references, `scratch` VMs missing `arch`/`profile`/`disk`, and wisp compilation errors in all referenced scripts. The goal mirrors Config Weave: validation catches everything that can be caught without touching QEMU.
+`vmlab validate` (and implicitly every other verb) evaluates the lab file against the vmlab WCL schema and fails before any side effect on errors including: unknown attributes, missing templates, undeclared segment references, static IPs outside their segment's subnet, duplicate static IPs/MACs, dependency cycles in `depends_on`, missing script files, archless or malformed template references, `scratch` VMs missing `arch`/`profile`/`disk`, and wscript compilation errors in all referenced scripts. The goal mirrors Config Weave: validation catches everything that can be caught without touching QEMU.
 
 ### 5.2 VM hardware surface
 
@@ -216,7 +216,7 @@ Templates are defined in `template {}` blocks — in a dedicated WCL file or alo
   - `scratch` (§6.5) — blank disk; the build's attached installer media and provision script do everything.
 - **Hardware** — disk size, profile, and any §5.2 attributes; these are recorded into the template's metadata and become the inheritance layer for VMs.
 - **Media** — additional ISO/floppy attachments for the build, including images built from folders (§6.3) — unattend files, driver media, agent installers.
-- **Provision scripts** — the same wisp machinery as labs (§10): the build boots the source, the script drives the installer with keystrokes/screen matching, installs the guest agent, configures, and seals.
+- **Provision scripts** — the same wscript machinery as labs (§10): the build boots the source, the script drives the installer with keystrokes/screen matching, installs the guest agent, configures, and seals.
 
 Build flow: create working qcow2 → boot per template hardware → run build provision scripts → graceful shutdown → move qcow2 + metadata into the store under `<arch>/<name>/<version>/`. A failed build leaves nothing in the store.
 
@@ -333,7 +333,7 @@ The daemon emits structured events, minimally:
 
 ### 8.2 Handlers
 
-`on "<event>" run "<script.wisp>"` in the lab file binds events to wisp handler scripts, which receive the event payload and a lab handle. Handler failures are logged, never fatal to the daemon. Typical uses: collect artefacts on crash, alert on disk pressure, restart policies implemented in script rather than baked into the daemon.
+`on "<event>" run "<script.wscript>"` in the lab file binds events to wscript handler scripts, which receive the event payload and a lab handle. Handler failures are logged, never fatal to the daemon. Typical uses: collect artefacts on crash, alert on disk pressure, restart policies implemented in script rather than baked into the daemon.
 
 Lab daemons emit their own events and forward them to the supervisor, which maintains the host-wide aggregate stream; subscribers can attach at either level.
 
@@ -407,7 +407,7 @@ Declared in WCL (`forward { host_port = 13389 to = "dc01:3389" }`) or created at
 
 ### 9.9 Filtering and redirection
 
-Two enforcement layers, declared in WCL and **mutable at runtime from wisp scripts** — runtime mutation is a first-class lab scenario ("block the DC, watch the client fail over"). Static filtering and redirection belong in `vmlab.wcl`; there is no `vmlab net` CLI surface:
+Two enforcement layers, declared in WCL and **mutable at runtime from wscript scripts** — runtime mutation is a first-class lab scenario ("block the DC, watch the client fail over"). Static filtering and redirection belong in `vmlab.wcl`; there is no `vmlab net` CLI surface:
 
 - **DNS rules** (per segment or lab): sinkhole a name (NXDOMAIN or 0.0.0.0) or override it to a chosen IP. Wildcards supported (`*.telemetry.example.com`). Only effective for guests using the segment DNS.
 - **L3 rules at the switch** (per segment): match on IP/CIDR and optionally protocol/port.
@@ -418,9 +418,9 @@ Evaluation order: redirect rules before block rules; within a layer, most-specif
 
 ---
 
-## 10. wisp scripting surface
+## 10. wscript scripting surface
 
-> **⚠ Binding note.** Function names, signatures, module/import syntax, and the shape of `Value`/`Result` types below are illustrative. The real surface binds to the wisp spec; vmlab registers its API as a wisp host module and ships the corresponding `.wispi` interface file so script authors get full LSP support (diagnostics, hover, completion), mirroring the Config Weave approach.
+> **⚠ Binding note.** Function names, signatures, module/import syntax, and the shape of `Value`/`Result` types below are illustrative. The real surface binds to the wscript spec; vmlab registers its API as a wscript host module and ships the corresponding `.wscripti` interface file so script authors get full LSP support (diagnostics, hover, completion), mirroring the Config Weave approach.
 
 Scripts are **daemon-unaware**: they receive a lab handle and operate on it. Provision scripts and event handlers use the same API.
 
@@ -495,12 +495,12 @@ vm.copy_to(local, guest_path)
 vm.copy_from(guest_path, local)
 ```
 
-All blocking calls take timeouts and return wisp `Result`s; an error propagating out of a provision script fails the provision run (and therefore `vmlab up`) with the error attached to the lab log.
+All blocking calls take timeouts and return wscript `Result`s; an error propagating out of a provision script fails the provision run (and therefore `vmlab up`) with the error attached to the lab log.
 
 ### 10.4 Execution model
 
 - Provision scripts listed in `vmlab.wcl` run in declaration order during `up`, after the VMs they reference are started per `depends_on`. A script orchestrating multiple VMs (stand up DC → wait → join member) is the expected normal case.
-- Any script is also invocable ad hoc: `vmlab script scripts/whatever.wisp`.
+- Any script is also invocable ad hoc: `vmlab script scripts/whatever.wscript`.
 - Event handlers receive `(event: Value, lab)` — the one dynamic escape hatch, consistent with Config Weave's boundary model.
 - Template build scripts get the same API scoped to the single build VM (a lab handle containing one VM).
 
@@ -530,7 +530,7 @@ The viewer is chosen automatically: an explicit `viewer` in host config wins, el
 | `vmlab console <vm>` | Attach viewer |
 | `vmlab exec [--timeout s] <vm> -- cmd` | Guest-agent exec |
 | `vmlab cp <src> <vm>:<dest>` | Copy a host file/tree into a guest via the agent |
-| `vmlab script <script.wisp>` | Ad-hoc script against the current lab |
+| `vmlab script <script.wscript>` | Ad-hoc script against the current lab |
 | `vmlab logs [lab/][vm]` | Tail/dump JSON-line logs |
 | `vmlab template build / list / rm / export / import` | Template store |
 | `vmlab template push / pull / login` | OCI registry distribution (§6.4) |
@@ -559,7 +559,7 @@ vmlab ships an official Docker/OCI **runtime image** (distinct from template art
 ## 15. Suggested milestones
 
 1. **M1 — Core lifecycle:** supervisor + lab daemon split with socket protocol, WCL schema + validate, template store (import existing qcow2 only), linked clones, start/stop, QMP, guest agent exec/copy, single NAT'd zero-config segment, logs.
-2. **M2 — Automation surface:** wisp host module (lifecycle, exec, keys, screenshot, image match, waits), provision scripts, `run`, snapshots both modes.
+2. **M2 — Automation surface:** wscript host module (lifecycle, exec, keys, screenshot, image match, waits), provision scripts, `run`, snapshots both modes.
 3. **M3 — Network fabric:** named segments, DHCP + reservations + option 121, DNS + registration + forwarding, port forwards, console/VNC.
 4. **M4 — Template builds + shares:** ISO sources w/ URL+hash, media building, build scripts, export/import, profiles complete incl. legacy, SMB shared folders (smbd backend acceptable initially per §7.5).
 5. **M5 — Advanced networking + events:** global segments, cross-host attach, inter-segment routing, filtering/redirection + runtime mutation, event handlers, watchdogs, OCR.
@@ -577,7 +577,7 @@ Formerly open; all resolved 2026-06-12 and folded into the sections referenced:
 | 4 | Snapshot mechanism | qcow2-internal wherever possible — keeps disk clean; external only where internal can't meet the contract (§7.3) |
 | 5 | Cross-host auth | Pre-shared key, kept deliberately simple (§9.2) |
 | 6 | OCR binding | Implementation detail; §10.3 API binds |
-| 7 | wisp runtime location | Inside the lab daemon — co-located with events and state (§3) |
+| 7 | wscript runtime location | Inside the lab daemon — co-located with events and state (§3) |
 | 8 | OCI chunk default | 512 MiB zstd; sized against GHCR's 10 GB/layer limit and 10-minute upload timeout (§6.4) |
 | 9 | OCI media/artifact types | `application/vnd.vmlab.*.v1` family; freeze before first public push |
 | 10 | Lab-daemon crash handling | Supervisor marks failed + emits event; no auto-restart — restart policy belongs to script handlers (§3, §8) |
@@ -589,7 +589,7 @@ Formerly open; all resolved 2026-06-12 and folded into the sections referenced:
 | 4 | Snapshot mechanism (internal vs external) | Implementation design doc; behaviour contract in §7.3 binds |
 | 5 | Daemon-to-daemon auth for cross-host segments | PSK minimum; design doc |
 | 6 | OCR engine binding (Tesseract via library vs subprocess) | Implementation detail; API in §10.3 binds |
-| 7 | Where the wisp runtime executes | Implementation detail; daemon-unaware API binds |
+| 7 | Where the wscript runtime executes | Implementation detail; daemon-unaware API binds |
 | 8 | Default OCI chunk size + compression level | ~512 MiB zstd; verify against current registry per-blob limits at implementation |
 | 9 | Exact vmlab OCI media/artifact type strings | `application/vnd.vmlab.*.v1` family; freeze before first public push |
 | 10 | Supervisor behaviour on lab-daemon crash | Mark failed + event only (no auto-restart); revisit if restart policies prove wanted beyond script handlers |

@@ -37,7 +37,7 @@ vmlab snapshot delete <vm> <name>
 
 ```sh
 vmlab exec <vm> -- <cmd> [args...]   # run via guest agent, prints stdout/stderr
-vmlab script <script.wisp>           # ad-hoc wisp script against the running lab (fn main(lab: Lab))
+vmlab script <script.wscript>           # ad-hoc wscript script against the running lab (fn main(lab: Lab))
 ```
 
 ## Console & logs
@@ -52,8 +52,8 @@ vmlab logs -n 50            # lines of history (default 100)
 
 Networking (segments, forwards, routes, filtering/redirection) is
 declarative in `vmlab.wcl`; there is no `vmlab net` CLI. Runtime rule
-mutation is available from wisp scripts via the `Segment` API (see
-wisp-api.md).
+mutation is available from wscript scripts via the `Segment` API (see
+wscript-api.md).
 
 ## Templates (store + builds)
 

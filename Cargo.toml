@@ -7,7 +7,7 @@ description = "Single-host virtual machine lab orchestrator"
 
 [dependencies]
 wcl_lang = { git = "https://github.com/wiltaylor/wcl.git", rev = "1bf3af0876536166855b46e6cd6eb3937505ae5e" }
-wisp = { git = "https://github.com/wiltaylor/wisp.git", rev = "29405c9d519b3e921202833b1ecdb9da9aaf332e" }
+wscript = { git = "https://github.com/Configweave/wscript.git", rev = "fcd51236239225ea3e89a82fec44d30f7b871426" }
 
 anyhow = "1"
 thiserror = "2"

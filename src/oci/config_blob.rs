@@ -46,7 +46,7 @@ pub struct TemplateConfig {
     pub registry: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub sha256: Option<String>,
-    /// Embedded first-boot wisp script source (PRD §6.1).
+    /// Embedded first-boot wscript script source (PRD §6.1).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub first_boot_script: Option<String>,
 }

@@ -74,7 +74,7 @@ async fn run_async(lab: String, root: PathBuf) -> Result<()> {
         },
     );
 
-    // Event → wisp handler bindings (PRD §8.2). Failures are logged, never
+    // Event → wscript handler bindings (PRD §8.2). Failures are logged, never
     // fatal.
     {
         let handlers = runtime.config.lab.handlers.clone();

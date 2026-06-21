@@ -1,6 +1,6 @@
 //! Transport-aware VM interaction primitives (PRD §10.3): screen capture,
 //! keyboard, pointer, OCR, and image search over a [`VmInstance`]. The
-//! QMP-vs-VNC choice (`vm.resolved.input_transport`) lives here so the wisp
+//! QMP-vs-VNC choice (`vm.resolved.input_transport`) lives here so the wscript
 //! `VmHandle` methods and the `vmlab vm` CLI subcommands share one
 //! implementation.
 

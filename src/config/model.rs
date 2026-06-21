@@ -353,7 +353,7 @@ pub struct TemplateDef {
     /// Watch the build VM in QEMU's own window (§11).
     pub gui: bool,
     pub qemu_args: Vec<String>,
-    /// Wisp script (path relative to the template root) run the first time a VM
+    /// Wscript script (path relative to the template root) run the first time a VM
     /// is instantiated from this template, before it is reported ready (§6.1).
     pub first_boot: Option<PathBuf>,
     pub source: TemplateSource,

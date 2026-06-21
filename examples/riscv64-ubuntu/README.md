@@ -27,7 +27,7 @@ ssh vmlab@localhost -p 12322      # password: vmlab
 vmlab down
 ```
 
-The provision script (`scripts/setup.wisp`) waits for the guest agent and
+The provision script (`scripts/setup.wscript`) waits for the guest agent and
 logs the guest's `uname -m` (should print `riscv64`) and os-release. Watch it
 with `vmlab logs`.
 

@@ -1,8 +1,8 @@
-# wisp language essentials (for vmlab scripts)
+# wscript language essentials (for vmlab scripts)
 
-wisp is a statically typed, Rust-flavored scripting language. Think Rust
+wscript is a statically typed, Rust-flavored scripting language. Think Rust
 minus the borrow checker, lifetimes, and user generics. Full tour:
-`../wisp/docs/tour.md` (sibling repo). vmlab compiles scripts with full
+`../wscript/docs/tour.md` (sibling repo). vmlab compiles scripts with full
 type checking at `vmlab validate` time.
 
 ## Types & values
@@ -97,9 +97,9 @@ pad_left pad_right chars slice parse_int parse_float`.
 always available: `print println str fmt same weak int float`. Scripts are
 single files in v1 — no script-to-script imports.
 
-## Not in wisp (v1)
+## Not in wscript (v1)
 
 No `&`/`&mut`, lifetimes, user generics, exceptions, async, threads,
 truthiness, implicit conversions, string interpolation, `+=`, bitwise ops.
 
-Source of truth: `/home/wil/dev/wisp/docs/tour.md`.
+Source of truth: `/home/wil/dev/wscript/docs/tour.md`.

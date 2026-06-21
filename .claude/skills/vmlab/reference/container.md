@@ -3,7 +3,7 @@
 ## Build
 
 The image is defined by `Containerfile` in the vmlab repo. vmlab depends on
-sibling `WCL/` and `wisp/` workspaces via path deps, so the **build context
+sibling `WCL/` and `wscript/` workspaces via path deps, so the **build context
 is the parent directory** containing all three:
 
 ```sh
@@ -40,7 +40,7 @@ children. Two usage modes:
   the CLI via `docker exec <ctr> vmlab ...` (or a second container sharing
   the socket volume).
 - **One-shot / CI:** override the command, e.g.
-  `docker run ... vmlab vmlab up && vmlab run test.wisp` and exit.
+  `docker run ... vmlab vmlab up && vmlab run test.wscript` and exit.
 
 ## What's inside
 

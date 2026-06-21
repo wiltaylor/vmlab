@@ -26,5 +26,5 @@ template "windows-server-2025" {
   media { kind = "iso" from = "./unattend/" label = "UNATTEND" }
   nic { nat = true }
 
-  provision "scripts/install.wisp" { }
+  provision "scripts/install.wscript" { }
 }

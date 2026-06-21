@@ -35,7 +35,7 @@ lab "mixed-lab" {
     nic { segment = "lan" }                         // dynamic lease
   }
 
-  provision "scripts/setup.wisp" { }
+  provision "scripts/setup.wscript" { }
 
-  on "vm.crashed" { run = "scripts/on-crash.wisp" }
+  on "vm.crashed" { run = "scripts/on-crash.wscript" }
 }

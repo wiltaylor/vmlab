@@ -213,10 +213,10 @@ lab "ad-lab" {
     nic { segment = "dmz" }
   }
 
-  provision "scripts/setup.wisp" { }
+  provision "scripts/setup.wscript" { }
 
-  on "vm.crashed"    { run = "scripts/collect-dumps.wisp" }
-  on "host.disk_low" { run = "scripts/alert.wisp" }
+  on "vm.crashed"    { run = "scripts/collect-dumps.wscript" }
+  on "host.disk_low" { run = "scripts/alert.wscript" }
 }
 "#;
 
@@ -316,7 +316,7 @@ template "base" {
   disk    = "20G"
   source "iso" { url = "https://example.com/x.iso" sha256 = "abc123" }
   media { kind = "iso" from = "./unattend/" }
-  provision "scripts/install.wisp" { }
+  provision "scripts/install.wscript" { }
 }
 "#;
         let lf = load_lab_source(src, "<test>", Path::new("/tmp")).unwrap();
@@ -333,7 +333,7 @@ template "base" {
     }
 
     /// Every shipped example template's `vmlab.wcl` must parse (keeps the
-    /// examples/templates/ definitions honest, like the wisp script test).
+    /// examples/templates/ definitions honest, like the wscript script test).
     #[test]
     fn shipped_example_templates_parse() {
         let root = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/templates");
