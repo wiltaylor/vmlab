@@ -259,6 +259,12 @@ impl Supervisor {
         if let Ok(client) = Client::connect(&sock).await {
             let _ = client.call("shutdown", Value::Null).await;
         } else {
+            // The daemon is gone and can't have stopped its VMs. Reap any QEMU
+            // processes it orphaned, then drop the registry entry.
+            let killed = crate::qemu::process::kill_lab_orphans(name);
+            if killed > 0 {
+                tracing::warn!("reaped {killed} orphaned QEMU process(es) for lab {name}");
+            }
             let mut reg = self.registry.lock().await;
             reg.remove(name);
             reg.save();

@@ -171,6 +171,47 @@ fn which(bin: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
+/// Does this raw `/proc/<pid>/cmdline` (NUL-separated argv) belong to a VM in
+/// `lab`? Matches our QEMU `-name vmlab:<lab>/<vm>` marker (see cmdline.rs).
+/// The trailing `/` keeps `foo` from matching `foobar`'s VMs.
+fn cmdline_is_lab_qemu(cmdline: &[u8], lab: &str) -> bool {
+    let marker = format!("vmlab:{lab}/");
+    cmdline
+        .split(|b| *b == 0)
+        .any(|arg| arg.starts_with(marker.as_bytes()))
+}
+
+/// SIGKILL any QEMU processes belonging to `lab`, identified by the
+/// `-name vmlab:<lab>/<vm>` marker in their argv. Returns how many were
+/// signalled. Used to reap VMs orphaned by a lab daemon that died without
+/// stopping them — there is no `Proc` handle left, so we scan `/proc`.
+pub fn kill_lab_orphans(lab: &str) -> usize {
+    let mut killed = 0;
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return 0;
+    };
+    for entry in entries.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|s| s.parse::<i32>().ok())
+        else {
+            continue;
+        };
+        let Ok(cmdline) = std::fs::read(entry.path().join("cmdline")) else {
+            continue;
+        };
+        if cmdline_is_lab_qemu(&cmdline, lab) {
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(pid),
+                nix::sys::signal::Signal::SIGKILL,
+            );
+            killed += 1;
+        }
+    }
+    killed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,5 +255,42 @@ mod tests {
     #[test]
     fn binaries_present_on_host() {
         assert!(check_binaries(&["x86_64"]).is_empty());
+    }
+
+    #[test]
+    fn lab_qemu_cmdline_matching() {
+        // Real-ish argv: NUL-separated, with the -name marker.
+        let cmd = b"qemu-system-x86_64\0-name\0vmlab:mylab/web\0-machine\0q35\0";
+        assert!(cmdline_is_lab_qemu(cmd, "mylab"));
+        // A different lab must not match.
+        assert!(!cmdline_is_lab_qemu(cmd, "other"));
+        // Prefix collision: `my` must not match `mylab`'s VMs.
+        assert!(!cmdline_is_lab_qemu(cmd, "my"));
+        // No marker at all.
+        assert!(!cmdline_is_lab_qemu(b"sleep\x0030\x00", "mylab"));
+    }
+
+    #[test]
+    fn kill_lab_orphans_reaps_marked_process() {
+        use std::os::unix::process::CommandExt;
+        // Spawn a real process carrying our QEMU `-name` marker as argv[0]
+        // (the binary is still `sleep`, so it just blocks).
+        let lab = "orphan-reap-test";
+        let mut child = std::process::Command::new("sleep")
+            .arg("600")
+            .arg0(format!("vmlab:{lab}/vm0"))
+            .spawn()
+            .unwrap();
+        // Let /proc settle, then reap it by lab name.
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let killed = kill_lab_orphans(lab);
+        let status = child.wait().unwrap();
+        assert_eq!(killed, 1, "expected exactly one process reaped");
+        assert!(
+            !status.success(),
+            "process should have been killed by signal"
+        );
+        // A different lab name reaps nothing.
+        assert_eq!(kill_lab_orphans("some-other-lab"), 0);
     }
 }
