@@ -1,31 +1,49 @@
-# Official vmlab runtime image (PRD §14): the vmlab binary plus its full
-# runtime dependency set. Because the network fabric is userspace, the
-# container needs NO --privileged, no extra capabilities, and no host network
-# mode — `--device /dev/kvm` is the only host grant needed for acceleration
-# (without it, vmlab falls back to TCG with a loud warning).
+# Official vmlab runtime image (PRD §14): the `vmlab` CLI + the `vmlab-web` UI
+# server plus their full runtime dependency set. The userspace network fabric
+# means the container needs NO --privileged, no extra capabilities, and no host
+# network mode — `--device /dev/kvm` is the only host grant needed for
+# acceleration (without it, vmlab falls back to TCG with a loud warning).
 #
-# vmlab depends on the sibling WCL and wscript workspaces via path deps, so the
-# build context is the PARENT directory containing vmlab/, WCL/, and wscript/.
+# By default the container runs `vmlab-web` bound to 0.0.0.0:7878 so the web UI
+# is reachable through a published port. A non-loopback bind auto-enables auth,
+# so supply credentials:
 #
-# Build:  docker build -t vmlab -f vmlab/Containerfile .      (run from ../)
-#    or:  just image                                          (from vmlab/)
-# Run:    docker run --rm -it --device /dev/kvm \
-#           -v ~/.local/share/vmlab/templates:/root/.local/share/vmlab/templates \
-#           -v "$PWD":/lab -w /lab vmlab vmlab up
+#   docker run --rm -p 7878:7878 --device /dev/kvm \
+#     -e VMLAB_WEB_USER=admin -e VMLAB_WEB_PASSWORD=secret \
+#     -v "$PWD":/lab vmlab
+#
+# The CLI is still available by overriding the command:
+#
+#   docker run --rm --device /dev/kvm -v "$PWD":/lab vmlab vmlab up
+#   docker exec <container> vmlab status
+#
+# Build:  docker build -t vmlab -f Containerfile .      (context = this dir)
+#    or:  just image      /      docker compose build
+#
+# WCL + wscript are git dependencies (fetched during the cargo build), so the
+# build context is just this repository — no sibling checkouts required.
+
+# ---- frontend ---------------------------------------------------------------
+# Build the SolidJS web UI; the output is embedded into vmlab-web (rust-embed).
+FROM node:20-bookworm-slim AS web
+WORKDIR /web
+COPY web-ui/package.json web-ui/package-lock.json ./
+RUN npm ci
+COPY web-ui/ ./
+RUN npm run build
 
 # ---- builder ----------------------------------------------------------------
 FROM rust:1.92-bookworm AS builder
-WORKDIR /build
-# Bring in vmlab plus its sibling path dependencies.
-COPY vmlab ./vmlab
-COPY WCL ./WCL
-COPY wscript ./wscript
-RUN cargo build --release --locked --manifest-path vmlab/Cargo.toml
+WORKDIR /build/vmlab
+COPY . .
+# Supply the built web assets so rust-embed can bake them into vmlab-web.
+COPY --from=web /web/dist ./web-ui/dist
+RUN cargo build --release --locked --features web --bin vmlab --bin vmlab-web
 
 # ---- runtime ----------------------------------------------------------------
 FROM debian:bookworm-slim
 # QEMU system emulators, firmware, swtpm, OCR, NAT, ISO/floppy tooling, SMB
-# server, and a VNC-capable toolchain (PRD §14).
+# server (PRD §14).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         qemu-system-x86 \
         qemu-system-arm \
@@ -42,17 +60,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /build/vmlab/target/release/vmlab /usr/local/bin/vmlab
+# vmlab-web spawns the `vmlab` binary for the supervisor/lab daemons (it locates
+# it as a sibling), so both must sit in the same directory.
+COPY --from=builder /build/vmlab/target/release/vmlab     /usr/local/bin/vmlab
+COPY --from=builder /build/vmlab/target/release/vmlab-web /usr/local/bin/vmlab-web
 
 # Documented volume mounts (PRD §14):
 #   /root/.local/share/vmlab/templates  — the template store
-#   /lab                                — the lab directory
+#   /lab                                — the lab directory (holds vmlab.wcl)
 # Everything else is container-ephemeral by design.
 VOLUME ["/root/.local/share/vmlab/templates"]
 WORKDIR /lab
+EXPOSE 7878
 
-# Entrypoint defaults to the supervisor in the foreground; lab daemons are its
-# children. `docker exec` (or a second container sharing the socket volume)
-# drives the CLI. A one-shot CI mode is `docker run vmlab vmlab up && ...`.
-ENTRYPOINT ["vmlab"]
-CMD ["daemon", "start"]
+# Default: serve the web UI. No ENTRYPOINT, so the command is overridable for
+# CLI/one-shot use (e.g. `docker run vmlab vmlab up`).
+CMD ["vmlab-web", "--bind", "0.0.0.0", "--port", "7878"]

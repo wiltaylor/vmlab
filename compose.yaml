@@ -1,0 +1,31 @@
+# vmlab web UI stack.
+#
+#   docker compose up --build      # build + serve the web UI on :7878
+#
+# Then open http://localhost:7878 and sign in with VMLAB_WEB_USER /
+# VMLAB_WEB_PASSWORD (defaults below — change them before exposing this beyond
+# your machine). Put your lab's vmlab.wcl in ./docker/lab (a sample is shipped).
+services:
+  vmlab-web:
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: vmlab:latest
+    ports:
+      - "7878:7878"
+    # KVM acceleration. Drop this line to run under TCG emulation (much slower).
+    devices:
+      - "/dev/kvm:/dev/kvm"
+    environment:
+      # The web UI binds 0.0.0.0 in the container, which requires a login.
+      VMLAB_WEB_USER: "${VMLAB_WEB_USER:-vmlab}"
+      VMLAB_WEB_PASSWORD: "${VMLAB_WEB_PASSWORD:-vmlab}"
+    volumes:
+      # Your lab directory — edit ./docker/lab/vmlab.wcl on the host.
+      - ./docker/lab:/lab
+      # Persistent template store (templates are pulled on first `up`).
+      - vmlab-templates:/root/.local/share/vmlab/templates
+    restart: unless-stopped
+
+volumes:
+  vmlab-templates:

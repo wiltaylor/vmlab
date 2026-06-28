@@ -214,3 +214,48 @@ jobs:
           prerelease: ${{ needs.version.outputs.prerelease }}
           generate_release_notes: true
           files: dist/**/*
+
+  # ── Container image ───────────────────────────────────────────────────────
+  # Build the version-stamped image (CLI + web UI) and push it to GHCR as
+  # ghcr.io/<owner>/vmlab:<version> (+ :latest), per release — matching the docs
+  # (docs/pages/vmlab/getting-started.wcl). The Containerfile builds from source,
+  # so this recompiles independently of the `build` job; GHA layer cache speeds
+  # up repeat runs. linux/amd64 only (vmlab drives QEMU/KVM → Linux x86_64).
+  image:
+    name: Build & push container image
+    needs: [version, check]
+    if: needs.version.outputs.do_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stamp version
+        run: |
+          V="${{ needs.version.outputs.version }}"
+          sed -i '0,/^version = ".*"$/s//version = "'"$V"'"/' Cargo.toml
+      - name: Image ref (lowercase owner)
+        id: img
+        run: echo "ref=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/vmlab" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Containerfile
+          push: true
+          tags: |
+            ${{ steps.img.outputs.ref }}:${{ needs.version.outputs.version }}
+            ${{ steps.img.outputs.ref }}:latest
+          # Links the GHCR package to this repo (and inherits its visibility).
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

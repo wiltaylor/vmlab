@@ -36,12 +36,10 @@ fmt:
 [group('check')]
 check: lint fmt-check test
 
-# Context is the parent directory so the sibling WCL/wscript path deps are
-# available to the build.
-# Build the official runtime container image (PRD §14)
+# Build the official runtime container image: `vmlab` CLI + `vmlab-web` (PRD §14)
 [group('build')]
 image tag='vmlab:latest':
-	docker build -t {{tag}} -f Containerfile ..
+	docker build -t {{tag}} -f Containerfile .
 
 # Install the vmlab binary into the user profile (~/.cargo/bin)
 [group('build')]
@@ -121,6 +119,16 @@ web-serve dir='examples/mixed-lab': web-build
 [group('web')]
 web-stop:
 	pkill -x vmlab-web && echo "vmlab-web stopped" || echo "vmlab-web not running"
+
+# Build + start the Docker web UI stack (serves the UI on :7878)
+[group('web')]
+compose-up:
+	docker compose up --build
+
+# Stop and remove the Docker web UI stack
+[group('web')]
+compose-down:
+	docker compose down
 
 # Run the Vite dev server with hot reload (proxies to a running vmlab-web on :7878)
 [group('web')]
