@@ -1,0 +1,60 @@
+name: Deploy Site
+
+# Builds the vmlab documentation site (docs/main.wcl -> docs/_site) with the
+# `wcl` CLI and deploys it to Cloudflare Pages (project "vmlab", configured in
+# wrangler.toml; the vmlab.dev custom domain is attached in the Cloudflare
+# dashboard). Runs only when docs/ — or the deploy config — change on main, so
+# an ordinary code push doesn't trigger a deploy.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'wrangler.toml'
+      - '.github/workflows/deploy-site.yml'
+
+env:
+  CARGO_TERM_COLOR: always
+  # Pin the wcl CLI to the same rev vmlab uses for wcl_lang in Cargo.toml, so
+  # the site renders with the wdoc version it was authored against.
+  WCL_REV: ed84924565334008ae0656be78e29338328c8419
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Cache the built wcl CLI binary, keyed on the pinned rev, to skip the
+      # (slow) cargo install on subsequent deploys.
+      - name: Cache wcl CLI
+        id: wcl-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/wcl
+          key: wcl-${{ env.WCL_REV }}
+
+      - name: Install wcl CLI
+        if: steps.wcl-cache.outputs.cache-hit != 'true'
+        run: cargo install --git https://github.com/wiltaylor/wcl.git --rev ${{ env.WCL_REV }} --locked wcl
+
+      - uses: taiki-e/install-action@just
+
+      - name: Build docs site
+        run: just docs-build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy
