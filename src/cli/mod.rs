@@ -3,7 +3,7 @@
 
 pub mod console;
 pub mod daemon;
-mod lab;
+pub mod lab;
 mod validate;
 
 use clap::{Parser, Subcommand, ValueEnum};

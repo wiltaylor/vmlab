@@ -1,27 +1,7 @@
-// Buildout in progress: items land before their consumers. Remove once the
-// CLI surface is complete (PRD §12).
-#![allow(dead_code)]
-
-mod cli;
-mod config;
-mod labd;
-mod media;
-mod net;
-mod oci;
-mod paths;
-mod profiles;
-mod proto;
-mod qemu;
-mod qga;
-mod qmp;
-mod scripting;
-mod smb;
-mod supervisor;
-mod template;
-mod viewer;
-mod vision;
-mod vnc;
+//! The `vmlab` CLI binary. All logic lives in the `vmlab` library crate; this
+//! binary is a thin entrypoint. The same binary also hosts the supervisor and
+//! lab daemons via hidden subcommands (see `vmlab::cli`).
 
 fn main() -> std::process::ExitCode {
-    cli::run()
+    vmlab::cli::run()
 }

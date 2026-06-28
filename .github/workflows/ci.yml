@@ -33,6 +33,16 @@ jobs:
           components: rustfmt, clippy
       - uses: taiki-e/install-action@just
       - uses: Swatinem/rust-cache@v2
+      # `just check` lints --all-features, which compiles vmlab-web; rust-embed
+      # needs web-ui/dist present at compile time, so build the frontend first.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build web UI
+        run: |
+          cd web-ui
+          npm ci
+          npm run build
       - run: just check
 
   # ── Version ───────────────────────────────────────────────────────────────
@@ -122,8 +132,9 @@ jobs:
           SUMMARY
 
   # ── Binary ────────────────────────────────────────────────────────────────
-  # Build the version-stamped `vmlab` CLI for Linux x86_64 (vmlab drives
-  # QEMU/KVM, so Linux is the only target). Uploaded for the release job.
+  # Build the version-stamped `vmlab` CLI and the `vmlab-web` UI server for
+  # Linux x86_64 (vmlab drives QEMU/KVM, so Linux is the only target). Both are
+  # uploaded for the release job.
   build:
     name: Build vmlab (${{ matrix.target }})
     needs: [version, check]
@@ -141,6 +152,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
       - uses: Swatinem/rust-cache@v2
         with:
           key: build-${{ matrix.target }}
@@ -148,15 +162,25 @@ jobs:
         run: |
           V="${{ needs.version.outputs.version }}"
           sed -i '0,/^version = ".*"$/s//version = "'"$V"'"/' Cargo.toml
-      - name: Build
+      - name: Build CLI
         run: cargo build --bin vmlab --release --target ${{ matrix.target }}
-      - name: Stage asset
+      # The web UI is embedded into vmlab-web (rust-embed), so build it first.
+      - name: Build web UI
+        run: |
+          cd web-ui
+          npm ci
+          npm run build
+      - name: Build web server
+        run: cargo build --bin vmlab-web --features web --release --target ${{ matrix.target }}
+      - name: Stage assets
         run: |
           V="${{ needs.version.outputs.version }}"
           cp "target/${{ matrix.target }}/release/vmlab" "vmlab-$V-${{ matrix.suffix }}"
+          cp "target/${{ matrix.target }}/release/vmlab-web" "vmlab-web-$V-${{ matrix.suffix }}"
       - uses: actions/upload-artifact@v4
         with:
           name: bin-${{ matrix.target }}
+          # Matches both vmlab-<v>-<suffix> and vmlab-web-<v>-<suffix>.
           path: vmlab-*-${{ matrix.suffix }}
           retention-days: 1
 

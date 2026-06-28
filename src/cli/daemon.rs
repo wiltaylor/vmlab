@@ -36,7 +36,9 @@ pub async fn ensure_supervisor() -> Result<Client> {
 
 fn spawn_supervisor() -> Result<()> {
     use std::os::unix::process::CommandExt;
-    let exe = crate::paths::self_exe()?;
+    // The supervisor + lab daemons live in the `vmlab` binary; a sibling like
+    // `vmlab-web` must spawn that, not itself.
+    let exe = crate::paths::vmlab_exe()?;
     crate::paths::ensure_dir(&crate::paths::state_dir())?;
     let log_path = crate::paths::state_dir().join("vmlabd.log");
     let log = std::fs::OpenOptions::new()

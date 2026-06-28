@@ -17,10 +17,10 @@ release:
 test:
 	cargo test
 
-# Run clippy with warnings as errors
+# Run clippy with warnings as errors (--all-features covers the web binary)
 [group('check')]
 lint:
-	cargo clippy --all-targets -- -D warnings
+	cargo clippy --all-targets --all-features -- -D warnings
 
 # Verify formatting without changing files
 [group('check')]
@@ -96,3 +96,33 @@ skill-build: wskill-check
 [group('docs')]
 docs-clean:
 	rm -rf docs/_site docs/wskills/vmlab/out
+
+# Install the SolidJS web UI's npm dependencies
+[group('web')]
+web-ui-install:
+	cd web-ui && npm install
+
+# Build the web UI to web-ui/dist (embedded into vmlab-web at compile time)
+[group('web')]
+web-ui-build:
+	cd web-ui && npm run build
+
+# Build the vmlab-web binary (frontend first, then the embedded server)
+[group('web')]
+web-build: web-ui-build
+	cargo build --features web --bin vmlab-web
+
+# Build and run vmlab-web against the lab in `dir` (Ctrl-C to stop)
+[group('web')]
+web-serve dir='examples/mixed-lab': web-build
+	cd {{dir}} && {{justfile_directory()}}/target/debug/vmlab-web
+
+# Stop any running vmlab-web server (useful when it was started in the background)
+[group('web')]
+web-stop:
+	pkill -x vmlab-web && echo "vmlab-web stopped" || echo "vmlab-web not running"
+
+# Run the Vite dev server with hot reload (proxies to a running vmlab-web on :7878)
+[group('web')]
+web-dev:
+	cd web-ui && npm run dev

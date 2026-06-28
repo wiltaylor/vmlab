@@ -794,12 +794,31 @@ impl LabRuntime {
             } else {
                 None
             };
+            // NICs in declaration order, paired with their resolved MACs — the
+            // web UI groups machines by segment and shows MACs from this.
+            let nics: Vec<Value> = vm
+                .cfg
+                .nics
+                .iter()
+                .enumerate()
+                .map(|(i, nic)| {
+                    json!({
+                        "segment": nic.segment,
+                        "mac": vm.macs.get(i).map(|m| m.to_string()),
+                        "static_ip": nic.ip.map(|a| a.to_string()),
+                    })
+                })
+                .collect();
             vms.push(json!({
                 "name": name,
                 "state": state,
                 "ready": ready,
                 "ip": ip,
                 "template": vm.cfg.template.to_string(),
+                "arch": vm.cfg.arch,
+                "cpus": vm.cfg.cpus,
+                "memory": vm.cfg.memory,
+                "nics": nics,
             }));
         }
         let net = self.network.lock().await;

@@ -36,6 +36,11 @@ PRD implemented (M1–M6). Module map under `src/`:
 - `smb/` — bundled-smbd shared folders.
 - `oci/` — OCI registry push/pull (chunked, multi-arch).
 - `cli/` — the `vmlab` verb surface.
+- `web/` — the `vmlab-web` binary (Actix-web): REST + WebSocket API over the
+  proto client, an embedded SolidJS console UI (`web-ui/`, rust-embed), live
+  noVNC over a `vnc.sock` WebSocket bridge, and username/password auth. Behind
+  the optional `web` feature; the crate also exposes a `[lib]` so this binary
+  reuses `proto`/`paths`/`cli`.
 
 `docs/vmlab-prd.md` remains the binding contract; section refs (`§N`) appear
 throughout the code and commit messages.

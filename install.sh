@@ -1,5 +1,6 @@
 #!/bin/sh
-# install.sh — install the `vmlab` CLI from a GitHub release.
+# install.sh — install the `vmlab` CLI (and the `vmlab-web` UI server, when the
+# release ships it) from a GitHub release.
 #
 #   curl -fsSL https://vmlab.io/install.sh | sh                       # latest stable
 #   curl -fsSL https://vmlab.io/install.sh | sh -s -- --pre           # latest pre-release
@@ -111,6 +112,23 @@ mv "$tmp" "$BIN_DIR/vmlab"
 trap - EXIT INT TERM
 
 printf 'Installed: %s\n' "$("$BIN_DIR/vmlab" --version 2>/dev/null || echo "$BIN_DIR/vmlab")"
+
+# ── vmlab-web (web UI server) ────────────────────────────────────────────────
+# Best-effort companion: older releases may not ship it, so a missing asset is
+# a note, not a failure.
+web_asset="vmlab-web-${ver}-${suffix}"
+web_url="https://github.com/$REPO/releases/download/$tag/$web_asset"
+web_tmp="$(mktemp)"
+trap 'rm -f "$web_tmp"' EXIT INT TERM
+if download_file "$web_url" "$web_tmp" 2>/dev/null; then
+  chmod +x "$web_tmp"
+  mv "$web_tmp" "$BIN_DIR/vmlab-web"
+  printf 'Installed: %s\n' "$("$BIN_DIR/vmlab-web" --version 2>/dev/null || echo "$BIN_DIR/vmlab-web")"
+else
+  rm -f "$web_tmp"
+  printf 'note: vmlab-web (web UI) is not available for %s — skipping\n' "$tag"
+fi
+trap - EXIT INT TERM
 
 # ── PATH hint ───────────────────────────────────────────────────────────────
 case ":$PATH:" in

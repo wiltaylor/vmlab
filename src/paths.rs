@@ -115,6 +115,23 @@ pub fn self_exe() -> std::io::Result<PathBuf> {
     Ok(exe)
 }
 
+/// Path to the `vmlab` binary that hosts the daemons (the `__supervisord` /
+/// `__labd` subcommands). For the CLI this is `self_exe()`; for siblings like
+/// `vmlab-web` it's the `vmlab` binary next to the current executable, falling
+/// back to `vmlab` on `PATH`.
+pub fn vmlab_exe() -> std::io::Result<PathBuf> {
+    let cur = self_exe()?;
+    if cur.file_name().and_then(|n| n.to_str()) == Some("vmlab") {
+        return Ok(cur);
+    }
+    if let Some(sibling) = cur.parent().map(|d| d.join("vmlab"))
+        && sibling.exists()
+    {
+        return Ok(sibling);
+    }
+    Ok(PathBuf::from("vmlab"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

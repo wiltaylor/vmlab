@@ -5,7 +5,33 @@ edition = "2024"
 license = "MIT"
 description = "Single-host virtual machine lab orchestrator"
 
+[lib]
+name = "vmlab"
+path = "src/lib.rs"
+
+# The CLI binary (supervisor + lab daemons ride along as hidden subcommands).
+[[bin]]
+name = "vmlab"
+path = "src/main.rs"
+
+# The web UI server — only built with `--features web`.
+[[bin]]
+name = "vmlab-web"
+path = "src/web/main.rs"
+required-features = ["web"]
+
+[features]
+default = []
+# Pulls in the HTTP stack for the `vmlab-web` binary. Kept optional so a plain
+# CLI build stays lean.
+web = ["dep:actix-web", "dep:actix-ws", "dep:rust-embed", "dep:mime_guess", "dep:argon2"]
+
 [dependencies]
+actix-web = { version = "4", optional = true }
+actix-ws = { version = "0.3", optional = true }
+rust-embed = { version = "8", optional = true }
+mime_guess = { version = "2", optional = true }
+argon2 = { version = "0.5", optional = true, features = ["std"] }
 wcl_lang = { git = "https://github.com/wiltaylor/wcl.git", rev = "ed84924565334008ae0656be78e29338328c8419" }
 wscript = { git = "https://github.com/Configweave/wscript.git", rev = "fcd51236239225ea3e89a82fec44d30f7b871426" }
 
