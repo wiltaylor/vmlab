@@ -11,6 +11,7 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
+      - 'install.sh'
       - 'wrangler.toml'
       - '.github/workflows/deploy-site.yml'
 
@@ -51,6 +52,12 @@ jobs:
 
       - name: Build docs site
         run: just docs-build
+
+      # Ship the installer at the site root so the curl one-liner resolves
+      # (https://vmlab.io/install.sh). docs/_site is rebuilt each deploy, so the
+      # copy lives here, not in the repo.
+      - name: Stage install script
+        run: cp install.sh docs/_site/
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
