@@ -27,7 +27,7 @@ re-pulled implicitly — updates are explicit via `vmlab template pull`.
 vm "box" {
   template = "ghcr.io/owner/linux-modern:1.0"
   arch     = "x86_64"     // explicit arch is required with registry refs
-  memory   = "4G"
+  memory   = 4GiB
 }
 ```
 
@@ -37,4 +37,4 @@ vm "box" {
 
 - [OCI artifact model](../references/fact_oci_artifact.md)
 
-[← All concepts](../references/concepts_ref.md)
+[← Back to SKILL.md](../SKILL.md)

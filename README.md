@@ -37,7 +37,7 @@ import <vmlab.wcl>
 lab "demo" {
   vm "box" {
     template = "x86_64/linux-modern"
-    memory   = "2G"
+    memory   = 2GiB
     nic { nat = true }
   }
 }
@@ -82,7 +82,7 @@ Worked examples under `examples/`, all built and run end-to-end:
 | `vmlab exec [--timeout s] <vm> -- cmd` | Guest-agent exec |
 | `vmlab cp <src> <vm>:<dest>` | Copy a host file or directory tree into a guest |
 | `vmlab osinfo <vm>` | Guest OS identification (guest-get-osinfo) as JSON |
-| `vmlab script <script.wscript>` | Ad-hoc script against the current lab |
+| `vmlab script <script.ws>` | Ad-hoc script against the current lab |
 | `vmlab logs [lab/][vm]` | Tail/dump JSON-line logs |
 | `vmlab template build / list / rm / export / import` | Template store |
 | `vmlab template push / pull / login` | OCI registry distribution |

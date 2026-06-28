@@ -18,4 +18,4 @@ What a pushed template actually is in the registry:
 
 - [Templates](../references/concept_templates.md)
 
-[← All facts](../references/facts_ref.md)
+[← Back to SKILL.md](../SKILL.md)

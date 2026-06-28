@@ -33,4 +33,4 @@ Methods: `is_some is_none unwrap unwrap_or expect` (Option) / `is_ok is_err unwr
 
 - [Lab](../references/entity_lab_api.md)
 
-[← All concepts](../references/concepts_ref.md)
+[← Back to SKILL.md](../SKILL.md)

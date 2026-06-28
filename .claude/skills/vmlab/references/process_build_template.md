@@ -1,18 +1,29 @@
 # Build a disk template
 
-**Purpose:** Produce a sealed, reusable qcow2 image in the local store from installer media.
+## Purpose
 
-_Preconditions:_ A template {} block exists in vmlab.wcl (or a file passed with -f)., Its source (ISO/qcow2/template/scratch) is reachable; URL sources have a sha256.
+Produce a sealed, reusable qcow2 image in the local store from installer media.
+
+## Prerequisites
+
+- A template {} block exists in vmlab.wcl (or a file passed with -f).
+- Its source (ISO/qcow2/template/scratch) is reachable; URL sources have a sha256.
+
+## Flowchart
+
+![diagram](../_wdoc/process_build_template-diagram-1.svg)
+
+## Steps
 
 ### Step 1: Define the template
 
 ```wcl
 template "linux-modern" {
-  arch = "x86_64"  version = "1.0"  profile = "linux-modern"  disk = "20G"
+  arch = "x86_64"  version = "1.0"  profile = "linux-modern"  disk = 20GiB
   source "iso" { url = "https://.../x.iso" sha256 = "abc123..." }
   media { kind = "iso" from = "./cloudinit/" label = "CIDATA" }
   nic { nat = true }
-  provision "scripts/install.wscript" { }   // drives the installer; installs the guest agent
+  provision "scripts/install.ws" { }   // drives the installer; installs the guest agent
 }
 ```
 
@@ -43,8 +54,12 @@ $ vmlab template list
 
 - [Templates](../references/concept_templates.md)
 
-- [Build sources](../references/concept_template_sources.md)
+- [template {} block](../references/entity_template_block.md)
 
-- [Media (ISO/floppy)](../references/concept_media.md)
+- [Template build flow](../references/concept_template_builds.md)
 
-[← All processes](../references/processes_ref.md)
+- [source {} build source](../references/entity_template_sources.md)
+
+- [media {} block](../references/entity_media.md)
+
+[← Back to SKILL.md](../SKILL.md)

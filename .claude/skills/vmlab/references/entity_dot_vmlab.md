@@ -15,4 +15,6 @@ Deleted by `vmlab destroy`. **Gitignore this directory.**
 
 - [Template store](../references/entity_template_store.md)
 
-[← All entities](../references/entities_ref.md)
+- [Linked clones](../references/concept_linked_clones.md)
+
+[← Back to SKILL.md](../SKILL.md)

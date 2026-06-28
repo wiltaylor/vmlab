@@ -20,8 +20,10 @@ Runtime network-rule mutation: DNS, blocking, redirects and forwards on a live s
 
 ## Related
 
-- [Networking & segments](../references/concept_networking.md)
+- [Networking model](../references/concept_networking.md)
+
+- [segment {} block](../references/entity_segment_block.md)
 
 - [Lab](../references/entity_lab_api.md)
 
-[← All entities](../references/entities_ref.md)
+[← Back to SKILL.md](../SKILL.md)

@@ -15,8 +15,8 @@ Hardware defaults selected with `profile = "..."`. Precedence is **VM block > te
 
 - [Guest OS profiles](../references/concept_profiles.md)
 
-- [VM block](../references/concept_vms.md)
+- [vm {} block](../references/entity_vms.md)
 
 - [Templates](../references/concept_templates.md)
 
-[← All facts](../references/facts_ref.md)
+[← Back to SKILL.md](../SKILL.md)

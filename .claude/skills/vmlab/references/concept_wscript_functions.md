@@ -22,4 +22,4 @@ unused Results (`let _ = vm.mouse_click("left")`) or add `;` to discard.
 
 - [wscript: overview](../references/concept_wscript_overview.md)
 
-[← All concepts](../references/concepts_ref.md)
+[← Back to SKILL.md](../SKILL.md)

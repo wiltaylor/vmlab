@@ -119,8 +119,8 @@ cli vmlab_cli {
   subcommand c_script {
     name = "script"
     description = "Run an ad-hoc wscript script against the running lab (entry point `fn main(lab: Lab)`)."
-    cli_arg a_script_file { name = "script.wscript"  description = "Path to the wscript file." }
-    code_example { lang = "console"  code = "vmlab script scripts/test.wscript" }
+    cli_arg a_script_file { name = "script.ws"  description = "Path to the wscript file." }
+    code_example { lang = "console"  code = "vmlab script scripts/test.ws" }
   }
 
   // ---- Console & logs ----

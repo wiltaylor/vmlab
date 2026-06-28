@@ -17,10 +17,10 @@ Manual control: `vmlab daemon start | stop | status`.
 
 ## Related
 
-- [Labs](../references/concept_labs.md)
+- [lab {} block](../references/entity_labs.md)
 
 - [Host config](../references/concept_host_config.md)
 
-- [Networking & segments](../references/concept_networking.md)
+- [Networking model](../references/concept_networking.md)
 
-[← All concepts](../references/concepts_ref.md)
+[← Back to SKILL.md](../SKILL.md)

@@ -1,6 +1,6 @@
-# Containers & WSL2
+# Containers
 
-_vmlab runs unprivileged in Docker/Podman and on WSL2 with only --device /dev/kvm; the network fabric is entirely userspace._
+_vmlab runs unprivileged in Docker/Podman with only --device /dev/kvm; the network fabric is entirely userspace._
 
 vmlab runs unprivileged. The container image is defined by `Containerfile`; because
 vmlab builds against sibling `WCL/` and `wscript/` workspaces, the \*\*build context
@@ -23,20 +23,12 @@ vmlab falls back to slow TCG emulation with a loud warning. The entrypoint is
 `docker exec <ctr> vmlab ...`, or override the command for one-shot/CI use.
 
 
-## WSL2
-
-WSL2 is a first-class host — no tap/bridge/macvlan and no `CAP_NET_ADMIN`. Enable
-nested virtualisation in `.wslconfig` (KVM needs it); reach guests from Windows via
-port forwards (WSL's localhost forwarding bridges them); use
-`vmlab console <vm> --tcp` for a Windows-side VNC viewer. `$XDG_RUNTIME_DIR` is
-created at daemon start if absent (falls back to `/tmp/vmlab-<uid>`). The ext4 VHDX
-grows as `.vmlab/` clones grow, so the `host.disk_low` watchdog matters more here.
-
-
 ## Related
 
 - [Daemon model](../references/concept_daemon_model.md)
 
-- [Networking & segments](../references/concept_networking.md)
+- [Networking model](../references/concept_networking.md)
 
-[← All concepts](../references/concepts_ref.md)
+- [WSL2](../references/concept_wsl2.md)
+
+[← Back to SKILL.md](../SKILL.md)

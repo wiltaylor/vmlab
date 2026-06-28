@@ -28,10 +28,10 @@ skill-build: wskill-check
 [group('render')]
 render: book-build skill-build
 
-# Serve the book projection with live reload
+# Serve the book projection with live reload; pass `true` to enable comment review mode (`just book-serve true`)
 [group('render')]
-book-serve:
-	wcl wdoc serve wdoc/book/main.wcl
+book-serve comment="false":
+	wcl wdoc serve wdoc/book/main.wcl {{ if comment == "true" { "--comment" } else { "" } }}
 
 # Remove generated output
 [group('clean')]

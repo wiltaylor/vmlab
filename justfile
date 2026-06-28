@@ -82,10 +82,10 @@ wskill-check:
 docs-build: wskill-check
 	wcl wdoc build docs/main.wcl --out docs/_site
 
-# Serve the website locally with live reload
+# Serve the website locally with live reload; pass `true` to enable comment review mode (`just docs-serve true`)
 [group('docs')]
-docs-serve:
-	wcl wdoc serve docs/main.wcl
+docs-serve comment="false":
+	wcl wdoc serve docs/main.wcl {{ if comment == "true" { "--comment" } else { "" } }}
 
 # Regenerate the Claude Code skill at .claude/skills/vmlab from the wskill (single source)
 [group('docs')]

@@ -17,4 +17,4 @@ content-addressed under `~/.cache/vmlab/artefacts/`.
 
 - [OCI distribution](../references/concept_oci.md)
 
-[← All entities](../references/entities_ref.md)
+[← Back to SKILL.md](../SKILL.md)

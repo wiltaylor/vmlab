@@ -1,0 +1,37 @@
+procedure run_in_container {
+  title   = "Run vmlab in a container"
+  purpose = "Run a lab unprivileged inside Docker/Podman with only /dev/kvm."
+  preconditions = ["The host exposes /dev/kvm (else vmlab falls back to slow TCG).", "The vmlab image is built or pulled."]
+  related = [containers, wsl2, daemon_model]
+  audience = :both
+
+  step build_image { n = 1
+    title = "Build the image"
+    body screen {
+      code "console" { source = <<'SH'
+$ docker build -t vmlab -f vmlab/Containerfile .   # from the PARENT dir (or: just image)
+SH
+      }
+      callout "Build context" { class = ["info"]  body = "vmlab builds against sibling WCL/ and wscript/ workspaces, so the build context is the parent directory containing all three." }
+    }
+    body steps { p "Build from the parent directory (or run `just image` from inside vmlab/). The image is also published per release as `ghcr.io/<owner>/vmlab:<version>`." }
+  }
+
+  step run_lab { n = 2
+    title = "Run a lab"
+    body screen {
+      code "console" { source = <<'SH'
+$ docker run --rm -it --device /dev/kvm \
+    -v ~/.local/share/vmlab/templates:/root/.local/share/vmlab/templates \
+    -v "$PWD":/lab -w /lab vmlab vmlab up
+SH
+      }
+      callout "Only /dev/kvm" { class = ["success"]  body = "No --privileged, no extra capabilities, no host network mode — the fabric is entirely userspace." }
+    }
+    body steps { p "Mount the template store (persistent) and the lab directory, grant `--device /dev/kvm`, and run a vmlab verb. For long-running use, start with the default `daemon start` CMD and drive via `docker exec <ctr> vmlab ...`." }
+  }
+
+  build_image -> run_lab
+
+  verification = "`vmlab status` (via `docker exec` or in the one-shot command) reports the lab running; no KVM-fallback warning appears in the logs."
+}

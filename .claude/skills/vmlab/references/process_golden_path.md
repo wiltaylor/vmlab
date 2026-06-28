@@ -1,8 +1,19 @@
 # Bring a lab up and tear it down
 
-**Purpose:** The everyday lifecycle: validate, boot with provisions, inspect, stop.
+## Purpose
 
-_Preconditions:_ A vmlab.wcl exists (found by walking up from cwd)., Referenced templates are in the store or are pullable registry refs.
+The everyday lifecycle: validate, boot with provisions, inspect, stop.
+
+## Prerequisites
+
+- A vmlab.wcl exists (found by walking up from cwd).
+- Referenced templates are in the store or are pullable registry refs.
+
+## Flowchart
+
+![diagram](../_wdoc/process_golden_path-diagram-1.svg)
+
+## Steps
 
 ### Step 1: Validate
 
@@ -52,12 +63,12 @@ Use `vmlab down` for a graceful stop that retains clones. Use `vmlab destroy` on
 
 ## Related
 
-- [Labs](../references/concept_labs.md)
+- [lab {} block](../references/entity_labs.md)
 
-- [VM block](../references/concept_vms.md)
+- [vm {} block](../references/entity_vms.md)
 
 - [Provisions & event handlers](../references/concept_provisions.md)
 
 - [What `vmlab validate` checks](../references/fact_validate_checks.md)
 
-[← All processes](../references/processes_ref.md)
+[← Back to SKILL.md](../SKILL.md)

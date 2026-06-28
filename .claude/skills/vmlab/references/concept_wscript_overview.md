@@ -13,10 +13,10 @@ when editing scripts.
 ## Entry points
 
 ```rust
-// Provision script (provision "x.wscript" {}) and `vmlab script x.wscript`:
+// Provision script (provision "x.ws" {}) and `vmlab script x.ws`:
 fn main(lab: Lab) { ... }       // an Err propagating out fails the provision run (and `vmlab up`)
 
-// Event handler (on "vm.crashed" { run = "x.wscript" }):
+// Event handler (on "vm.crashed" { run = "x.ws" }):
 fn handle(event: Event, lab: Lab) { ... }   // failures logged, never fatal
 ```
 
@@ -69,4 +69,4 @@ fn main(lab: Lab) {
 
 - [Provisions & event handlers](../references/concept_provisions.md)
 
-[← All concepts](../references/concepts_ref.md)
+[← Back to SKILL.md](../SKILL.md)

@@ -1,0 +1,35 @@
+entity labs {
+  name     = "lab {} block"
+  kind     = "WCL block"
+  summary  = "Declares a lab: a set of VMs plus the virtual networks connecting them, in vmlab.wcl."
+  related  = [vms, segment_block, networking, provisions, daemon_model, vmlab_wcl, dot_vmlab, schema_reference]
+  audience = :both
+  body {
+    p <<PROSE
+A **lab** is declared with a `lab {}` block in `vmlab.wcl`, located by walking up
+from the current directory (like git). Lab-local working data — linked clones,
+snapshots, built media, screenshots — lives in `.vmlab/` beside it; gitignore that
+directory. Every WCL file in a lab starts with `import <vmlab.wcl>`.
+PROSE
+    h2 "Minimal lab"
+    code "wcl" { source = <<'SRC'
+import <vmlab.wcl>
+
+lab "demo" {
+  gui = true                  // lab-wide default: show each guest's screen in a
+                              // QEMU window (VM `gui` overrides; silently headless
+                              // when no display server is available)
+  vm "box" {
+    template = "x86_64/linux-modern"
+    memory   = 2GiB
+    nic { nat = true }
+  }
+}
+SRC
+    }
+    p <<PROSE
+Closing a `gui` window kills that VM (QEMU semantics) — it surfaces as
+`vm.crashed`. The VNC socket (`vmlab console`) is available either way.
+PROSE
+  }
+}

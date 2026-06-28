@@ -10,10 +10,10 @@ and cannot be pushed or pulled.
 
 ## Related
 
-- [VM block](../references/concept_vms.md)
+- [vm {} block](../references/entity_vms.md)
 
 - [Templates](../references/concept_templates.md)
 
-- [Media (ISO/floppy)](../references/concept_media.md)
+- [media {} block](../references/entity_media.md)
 
-[← All concepts](../references/concepts_ref.md)
+[← Back to SKILL.md](../SKILL.md)

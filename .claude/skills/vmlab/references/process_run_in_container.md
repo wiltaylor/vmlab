@@ -1,8 +1,19 @@
 # Run vmlab in a container
 
-**Purpose:** Run a lab unprivileged inside Docker/Podman with only /dev/kvm.
+## Purpose
 
-_Preconditions:_ The host exposes /dev/kvm (else vmlab falls back to slow TCG)., The vmlab image is built or pulled.
+Run a lab unprivileged inside Docker/Podman with only /dev/kvm.
+
+## Prerequisites
+
+- The host exposes /dev/kvm (else vmlab falls back to slow TCG).
+- The vmlab image is built or pulled.
+
+## Flowchart
+
+![diagram](../_wdoc/process_run_in_container-diagram-1.svg)
+
+## Steps
 
 ### Step 1: Build the image
 
@@ -36,8 +47,10 @@ Mount the template store (persistent) and the lab directory, grant `--device /de
 
 ## Related
 
-- [Containers & WSL2](../references/concept_containers.md)
+- [Containers](../references/concept_containers.md)
+
+- [WSL2](../references/concept_wsl2.md)
 
 - [Daemon model](../references/concept_daemon_model.md)
 
-[← All processes](../references/processes_ref.md)
+[← Back to SKILL.md](../SKILL.md)

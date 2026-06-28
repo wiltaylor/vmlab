@@ -10,15 +10,10 @@ import "./schema/base.wcl"
 import "./schema/extensions.wcl"
 import "./schema/cli.wcl"               // opt-in: map the vmlab CLI as data
 
-// Data — reference units, glossary, examples and processes.
-import "./data/reference/concepts.wcl"
-import "./data/reference/entities.wcl"
-import "./data/reference/facts.wcl"
-import "./data/reference/glossary.wcl"
-import "./data/reference/examples.wcl"
-import "./data/reference/indexes.wcl"
-import "./data/reference/cli.wcl"
-import "./data/processes/processes.wcl"
+// Data — split into per-type folders (concept/ entity/ fact/ process/), one atomic
+// note per file, plus the grouped reference units (glossary, examples, CLI) and the
+// curated indexes. data/main.wcl aggregates them all.
+import "./data/main.wcl"
 
 schema_version = "1.1.0"
 
@@ -58,7 +53,7 @@ wcl.wskill::skill {
   skill_boundary {
     always = [
       "Run `vmlab validate` after editing `vmlab.wcl` and before `vmlab up`.",
-      "For multi-step guest automation, write a wscript script (`vmlab script x.wscript`) instead of chaining many `vmlab exec` calls.",
+      "For multi-step guest automation, write a wscript script (`vmlab script x.ws`) instead of chaining many `vmlab exec` calls.",
       "Cite the exact reference page when answering.",
     ]
     ask = [
@@ -73,7 +68,10 @@ wcl.wskill::skill {
 
 // ---- Sources (update-workflow metadata only) ----
 
-source vmlab_prd {
+// Qualified `wcl.wskill::source` — bare `source` is ambiguous now that the
+// reflected schema import (data/reference/schema.wcl) brings vmlab's own
+// `@block("source")` (TemplateSource) into scope.
+wcl.wskill::source vmlab_prd {
   kind         = "docs"
   locator      = "docs/vmlab-prd.md"
   covers       = "The binding product requirements: the source of truth for design and scope (sections §N are referenced throughout the code)."
@@ -81,7 +79,7 @@ source vmlab_prd {
   reflects_version = "1.0"
 }
 
-source vmlab_repo {
+wcl.wskill::source vmlab_repo {
   kind         = "repo"
   locator      = "/home/wil/dev/vmlab"
   covers       = "Source of truth for behaviour: src/config/schema.wcl (WCL schema), src/scripting/ (wscript host API), src/cli/, src/template/, src/profiles/shipped.wcl, examples/."
@@ -89,7 +87,7 @@ source vmlab_repo {
   reflects_version = "1.0"
 }
 
-source vmlab_cli_help {
+wcl.wskill::source vmlab_cli_help {
   kind         = "cli"
   locator      = "vmlab --help"
   covers       = "Subcommand help text for the full verb surface (lifecycle, vm, snapshot, exec, script, console, logs, template, daemon)."

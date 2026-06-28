@@ -1,16 +1,11 @@
 # Provisions & event handlers
 
-_provision {} scripts run on `vmlab up`; on "event" {} handlers react to lifecycle events._
+_provision {} scripts run on `vmlab up` (failure is fatal); on "event" {} handlers react to lifecycle events (failure is logged)._
 
-Provision scripts run on `vmlab up` in declaration order; event handlers react to lifecycle events. Both are wscript files.
+Provision scripts run on `vmlab up` in declaration order; event handlers react to
+lifecycle events. Both are wscript files — see [the provision block](../references/entity_provision_block.md)
+and [the event handler block](../references/entity_on_handler.md) for the declarations.
 
-```wcl
-provision "scripts/setup.wscript" { }                     // runs on `vmlab up`, in order
-provision "scripts/join.wscript"  { vms = ["client01"] }  // scoped: gates depends_on on these VMs
-
-on "vm.crashed"    { run = "scripts/collect-dumps.wscript" }
-on "host.disk_low" { run = "scripts/alert.wscript" }
-```
 
 **Provision failures fail `vmlab up`**; **handler failures are logged, never fatal.**
 A scoped provision (`vms = [...]`) gates `depends_on` on those VMs: dependents wait
@@ -38,8 +33,16 @@ fn handle(event: Event, lab: Lab) {
 
 ## Related
 
-- [Labs](../references/concept_labs.md)
+- [lab {} block](../references/entity_labs.md)
+
+- [provision {} block](../references/entity_provision_block.md)
+
+- [on "event" {} handler](../references/entity_on_handler.md)
+
+- [wscript: overview](../references/concept_wscript_overview.md)
 
 - [wscript: pattern matching & errors](../references/concept_wscript_matching.md)
 
-[← All concepts](../references/concepts_ref.md)
+- [Lifecycle events](../references/fact_events.md)
+
+[← Back to SKILL.md](../SKILL.md)

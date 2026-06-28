@@ -22,4 +22,4 @@ All XDG paths respect their environment variables.
 
 - [.vmlab/](../references/entity_dot_vmlab.md)
 
-[← All facts](../references/facts_ref.md)
+[← Back to SKILL.md](../SKILL.md)

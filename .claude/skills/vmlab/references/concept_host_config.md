@@ -12,7 +12,7 @@ host {
   disk_low_percent = 10                // host.disk_low watchdog threshold (default 10)
   psk              = "secret"          // pre-shared key for cross-host segment peering (§9.2)
   viewer           = "vncviewer {}"    // console viewer command; {} = target
-  oci_chunk_size   = "512M"            // OCI push layer chunk size (default 512M)
+  oci_chunk_size   = 512MiB            // OCI push layer chunk size (default 512M)
 }
 ```
 
@@ -24,4 +24,6 @@ See [the filesystem layout](../references/fact_paths_table.md) for where vmlab k
 
 - [Guest OS profiles](../references/concept_profiles.md)
 
-[← All concepts](../references/concepts_ref.md)
+- [The vmlab.wcl schema](../references/fact_schema_reference.md)
+
+[← Back to SKILL.md](../SKILL.md)

@@ -1,0 +1,43 @@
+// Indexes — curated landing pages that group the reference by task area. Each gets
+// its own top-level menu entry (between Overview and Reference). `related` resolves
+// to a link list. Ids prefixed `ix_` to stay globally unique.
+
+index ix_labs {
+  name     = "Labs & networking"
+  summary  = "Declare VMs and the virtual networks that connect them."
+  related  = [labs, vms, nic_block, networking, segment_block, segment_subblocks, shares, provisions, provision_block, on_handler, schema_reference]
+  audience = :both
+  body {
+    p "Everything for writing a `vmlab.wcl`: the lab and VM blocks, segment networking, SMB shares, and provision/event scripts."
+  }
+}
+
+index ix_templates {
+  name     = "Templates & distribution"
+  summary  = "Build reusable disk images and move them between machines."
+  related  = [templates, template_block, template_builds, linked_clones, template_sources, scratch_vms, media, oci, oci_artifact, schema_reference]
+  audience = :both
+  body {
+    p "Build templates from installer media, boot scratch VMs, generate ISO/floppy media, and distribute templates over OCI registries."
+  }
+}
+
+index ix_automation {
+  name     = "Automation (wscript)"
+  summary  = "Drive guests with wscript provision scripts and event handlers."
+  related  = [wscript_overview, wscript_types, wscript_functions, wscript_matching, wscript_modules, wscript_collections, wscript_strings, wscript_limits, lab_api, vm_api, vm_lifecycle, vm_snapshots, vm_input, vm_vision, vm_agent, seg_api, match_type, exec_result_type, event_type]
+  audience = :both
+  body {
+    p "The wscript language essentials and the vmlab host API (Lab / Vm / Segment) for automating guests — power, exec, keystrokes, screen matching and OCR."
+  }
+}
+
+index ix_operations {
+  name     = "Operations & hosting"
+  summary  = "Run vmlab: the CLI, daemons, host config, profiles, containers and WSL2."
+  related  = [daemon_model, host_config, profiles, profiles_table, paths_table, containers, wsl2, validate_checks, schema_reference]
+  audience = :both
+  body {
+    p "How vmlab runs: the two-tier daemon, the optional host config, guest OS profiles, and running unprivileged in containers or on WSL2. The CLI reference covers every verb."
+  }
+}

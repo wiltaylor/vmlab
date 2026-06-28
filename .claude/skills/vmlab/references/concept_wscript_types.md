@@ -20,6 +20,6 @@ let msg = fmt("{} of {}", 3, 10)   // {} formatting (no string interpolation)
 
 - [wscript: overview](../references/concept_wscript_overview.md)
 
-- [wscript: containers, strings & modules](../references/concept_wscript_containers.md)
+- [wscript: List & Map methods](../references/fact_wscript_collections.md)
 
-[← All concepts](../references/concepts_ref.md)
+[← Back to SKILL.md](../SKILL.md)

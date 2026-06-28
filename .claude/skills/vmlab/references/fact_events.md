@@ -20,4 +20,8 @@ Events fire `on "<event>" {}` handlers and arrive in `fn handle(event: Event, la
 
 - [Provisions & event handlers](../references/concept_provisions.md)
 
-[← All facts](../references/facts_ref.md)
+- [on "event" {} handler](../references/entity_on_handler.md)
+
+- [Event](../references/entity_event_type.md)
+
+[← Back to SKILL.md](../SKILL.md)

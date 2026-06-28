@@ -28,4 +28,4 @@ The lab handle passed to fn main(lab: Lab) / fn handle(event, lab) — find VMs 
 
 - [Provisions & event handlers](../references/concept_provisions.md)
 
-[← All entities](../references/entities_ref.md)
+[← Back to SKILL.md](../SKILL.md)

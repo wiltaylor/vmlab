@@ -30,7 +30,7 @@ page getting_started { sites = [:vmlab]  title = "Getting started"
       lab "demo" {
         vm "box" {
           template = "x86_64/linux-modern"
-          memory   = "2G"
+          memory   = 2GiB
           nic { nat = true }          // internet egress via a built-in NAT segment
         }
       }

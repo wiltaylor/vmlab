@@ -1,8 +1,19 @@
 # Distribute a template over an OCI registry
 
-**Purpose:** Push a stored template to a registry and pull it on another machine.
+## Purpose
 
-_Preconditions:_ The template exists in the local store., You can authenticate to the registry.
+Push a stored template to a registry and pull it on another machine.
+
+## Prerequisites
+
+- The template exists in the local store.
+- You can authenticate to the registry.
+
+## Flowchart
+
+![diagram](../_wdoc/process_distribute_oci-diagram-1.svg)
+
+## Steps
 
 ### Step 1: Log in
 
@@ -48,4 +59,4 @@ On the target machine, `vmlab template pull <ref>` reassembles the chunks and ve
 
 - [Templates](../references/concept_templates.md)
 
-[← All processes](../references/processes_ref.md)
+[← Back to SKILL.md](../SKILL.md)

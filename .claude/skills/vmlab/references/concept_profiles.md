@@ -12,10 +12,12 @@ shipped set.
 
 ## Related
 
-- [VM block](../references/concept_vms.md)
+- [vm {} block](../references/entity_vms.md)
 
 - [Templates](../references/concept_templates.md)
 
 - [Host config](../references/concept_host_config.md)
 
-[← All concepts](../references/concepts_ref.md)
+- [Shipped guest OS profiles](../references/fact_profiles_table.md)
+
+[← Back to SKILL.md](../SKILL.md)

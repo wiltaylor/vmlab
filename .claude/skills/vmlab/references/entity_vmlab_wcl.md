@@ -11,8 +11,8 @@ directory to the nearest `vmlab.wcl`. It declares one `lab {}` and/or any number
 
 ## Related
 
-- [Labs](../references/concept_labs.md)
+- [lab {} block](../references/entity_labs.md)
 
 - [.vmlab/](../references/entity_dot_vmlab.md)
 
-[← All entities](../references/entities_ref.md)
+[← Back to SKILL.md](../SKILL.md)

@@ -31,7 +31,7 @@ Values to pass when invoking this skill — reference them as `$ARGUMENTS`, `$1`
 
 - Run `vmlab validate` after editing `vmlab.wcl` and before `vmlab up`.
 
-- For multi-step guest automation, write a wscript script (`vmlab script x.wscript`) instead of chaining many `vmlab exec` calls.
+- For multi-step guest automation, write a wscript script (`vmlab script x.ws`) instead of chaining many `vmlab exec` calls.
 
 - Cite the exact reference page when answering.
 
@@ -49,23 +49,129 @@ Values to pass when invoking this skill — reference them as `$ARGUMENTS`, `$1`
 
 ## Reference
 
-- [Labs & networking](references/index_ix_labs.md) — Declare VMs and the virtual networks that connect them.
+### Labs & networking
 
-- [Templates & distribution](references/index_ix_templates.md) — Build reusable disk images and move them between machines.
+_Declare VMs and the virtual networks that connect them._
 
-- [Automation (wscript)](references/index_ix_automation.md) — Drive guests with wscript provision scripts and event handlers.
+Everything for writing a `vmlab.wcl`: the lab and VM blocks, segment networking, SMB shares, and provision/event scripts.
 
-- [Operations & hosting](references/index_ix_operations.md) — Run vmlab: the CLI, daemons, host config, profiles, containers and WSL2.
+- [lab {} block](references/entity_labs.md)
+
+- [vm {} block](references/entity_vms.md)
+
+- [nic {} block](references/entity_nic_block.md)
+
+- [Networking model](references/concept_networking.md)
+
+- [segment {} block](references/entity_segment_block.md)
+
+- [segment {} sub-blocks](references/fact_segment_subblocks.md)
+
+- [share {} block](references/entity_shares.md)
+
+- [Provisions & event handlers](references/concept_provisions.md)
+
+- [provision {} block](references/entity_provision_block.md)
+
+- [on "event" {} handler](references/entity_on_handler.md)
+
+- [The vmlab.wcl schema](references/fact_schema_reference.md)
+
+### Templates & distribution
+
+_Build reusable disk images and move them between machines._
+
+Build templates from installer media, boot scratch VMs, generate ISO/floppy media, and distribute templates over OCI registries.
+
+- [Templates](references/concept_templates.md)
+
+- [template {} block](references/entity_template_block.md)
+
+- [Template build flow](references/concept_template_builds.md)
+
+- [Linked clones](references/concept_linked_clones.md)
+
+- [source {} build source](references/entity_template_sources.md)
+
+- [Scratch VMs](references/concept_scratch_vms.md)
+
+- [media {} block](references/entity_media.md)
+
+- [OCI distribution](references/concept_oci.md)
+
+- [OCI artifact model](references/fact_oci_artifact.md)
+
+- [The vmlab.wcl schema](references/fact_schema_reference.md)
+
+### Automation (wscript)
+
+_Drive guests with wscript provision scripts and event handlers._
+
+The wscript language essentials and the vmlab host API (Lab / Vm / Segment) for automating guests — power, exec, keystrokes, screen matching and OCR.
+
+- [wscript: overview](references/concept_wscript_overview.md)
+
+- [wscript: types & values](references/concept_wscript_types.md)
+
+- [wscript: functions & control flow](references/concept_wscript_functions.md)
+
+- [wscript: pattern matching & errors](references/concept_wscript_matching.md)
+
+- [wscript: modules & prelude](references/concept_wscript_modules.md)
+
+- [wscript: List & Map methods](references/fact_wscript_collections.md)
+
+- [wscript: string methods](references/fact_wscript_strings.md)
+
+- [wscript: not in v1](references/fact_wscript_limits.md)
+
+- [Lab](references/entity_lab_api.md)
+
+- [Vm](references/entity_vm_api.md)
+
+- [Vm: lifecycle & state methods](references/fact_vm_lifecycle.md)
+
+- [Vm: snapshot methods](references/fact_vm_snapshots.md)
+
+- [Vm: keyboard & mouse methods](references/fact_vm_input.md)
+
+- [Vm: screen, image matching & OCR methods](references/fact_vm_vision.md)
+
+- [Vm: guest agent methods](references/fact_vm_agent.md)
+
+- [Segment](references/entity_seg_api.md)
+
+- [Match](references/entity_match_type.md)
+
+- [ExecResult](references/entity_exec_result_type.md)
+
+- [Event](references/entity_event_type.md)
+
+### Operations & hosting
+
+_Run vmlab: the CLI, daemons, host config, profiles, containers and WSL2._
+
+How vmlab runs: the two-tier daemon, the optional host config, guest OS profiles, and running unprivileged in containers or on WSL2. The CLI reference covers every verb.
+
+- [Daemon model](references/concept_daemon_model.md)
+
+- [Host config](references/concept_host_config.md)
+
+- [Guest OS profiles](references/concept_profiles.md)
+
+- [Shipped guest OS profiles](references/fact_profiles_table.md)
+
+- [Filesystem layout](references/fact_paths_table.md)
+
+- [Containers](references/concept_containers.md)
+
+- [WSL2](references/concept_wsl2.md)
+
+- [What `vmlab validate` checks](references/fact_validate_checks.md)
+
+- [The vmlab.wcl schema](references/fact_schema_reference.md)
 
 - [CLI reference](references/cli_ref.md) — every `vmlab` subcommand, its arguments and switches.
-
-- [Concepts](references/concepts_ref.md) — core ideas, one page each.
-
-- [Entities](references/entities_ref.md) — concrete things in the topic.
-
-- [Facts](references/facts_ref.md) — value tables and constants.
-
-- [Processes](references/processes_ref.md) — task runbooks.
 
 - [Glossary](references/glossary_ref.md) — terms and definitions.
 

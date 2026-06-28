@@ -122,7 +122,7 @@ lab "ad-lab" {
     template = "x86_64/windows-server-2025"   # arch required; latest version
     profile  = "windows-server"       # usually inherited from template
     cpus     = 4
-    memory   = "8G"
+    memory   = 8GiB
 
     nic { segment = "corp"  ip = "10.50.0.10" }   # static → DHCP reservation
   }
@@ -144,7 +144,7 @@ lab "ad-lab" {
     template = "scratch"               # no backing image: blank disk, OS install testing
     arch     = "x86_64"
     profile  = "windows-11"
-    disk     = "80G"
+    disk     = 80GiB
     cdrom    = "./isos/win11-build.iso"
   }
 
@@ -154,10 +154,10 @@ lab "ad-lab" {
     nic { segment = "dmz" }
   }
 
-  provision "scripts/setup.wscript" { }            # runs on `vmlab up`, in listed order
+  provision "scripts/setup.ws" { }            # runs on `vmlab up`, in listed order
 
-  on "vm.crashed"    run "scripts/collect-dumps.wscript"
-  on "host.disk_low" run "scripts/alert.wscript"
+  on "vm.crashed"    run "scripts/collect-dumps.ws"
+  on "host.disk_low" run "scripts/alert.ws"
 }
 ```
 
@@ -333,7 +333,7 @@ The daemon emits structured events, minimally:
 
 ### 8.2 Handlers
 
-`on "<event>" run "<script.wscript>"` in the lab file binds events to wscript handler scripts, which receive the event payload and a lab handle. Handler failures are logged, never fatal to the daemon. Typical uses: collect artefacts on crash, alert on disk pressure, restart policies implemented in script rather than baked into the daemon.
+`on "<event>" run "<script.ws>"` in the lab file binds events to wscript handler scripts, which receive the event payload and a lab handle. Handler failures are logged, never fatal to the daemon. Typical uses: collect artefacts on crash, alert on disk pressure, restart policies implemented in script rather than baked into the daemon.
 
 Lab daemons emit their own events and forward them to the supervisor, which maintains the host-wide aggregate stream; subscribers can attach at either level.
 
@@ -500,7 +500,7 @@ All blocking calls take timeouts and return wscript `Result`s; an error propagat
 ### 10.4 Execution model
 
 - Provision scripts listed in `vmlab.wcl` run in declaration order during `up`, after the VMs they reference are started per `depends_on`. A script orchestrating multiple VMs (stand up DC → wait → join member) is the expected normal case.
-- Any script is also invocable ad hoc: `vmlab script scripts/whatever.wscript`.
+- Any script is also invocable ad hoc: `vmlab script scripts/whatever.ws`.
 - Event handlers receive `(event: Value, lab)` — the one dynamic escape hatch, consistent with Config Weave's boundary model.
 - Template build scripts get the same API scoped to the single build VM (a lab handle containing one VM).
 
@@ -530,7 +530,7 @@ The viewer is chosen automatically: an explicit `viewer` in host config wins, el
 | `vmlab console <vm>` | Attach viewer |
 | `vmlab exec [--timeout s] <vm> -- cmd` | Guest-agent exec |
 | `vmlab cp <src> <vm>:<dest>` | Copy a host file/tree into a guest via the agent |
-| `vmlab script <script.wscript>` | Ad-hoc script against the current lab |
+| `vmlab script <script.ws>` | Ad-hoc script against the current lab |
 | `vmlab logs [lab/][vm]` | Tail/dump JSON-line logs |
 | `vmlab template build / list / rm / export / import` | Template store |
 | `vmlab template push / pull / login` | OCI registry distribution (§6.4) |

@@ -179,10 +179,10 @@ Run an ad-hoc wscript script against the running lab (entry point `fn main(lab: 
 
 | Argument | Required | Description |
 | --- | --- | --- |
-| script.wscript | required | Path to the wscript file. |
+| script.ws | required | Path to the wscript file. |
 
 ```console
-vmlab script scripts/test.wscript
+vmlab script scripts/test.ws
 ```
 
 ## vmlab console

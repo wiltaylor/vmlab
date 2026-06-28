@@ -14,10 +14,12 @@
 
 ## Related
 
-- [Labs](../references/concept_labs.md)
+- [lab {} block](../references/entity_labs.md)
 
-- [VM block](../references/concept_vms.md)
+- [vm {} block](../references/entity_vms.md)
 
 - [Provisions & event handlers](../references/concept_provisions.md)
 
-[← All facts](../references/facts_ref.md)
+- [The vmlab.wcl schema](../references/fact_schema_reference.md)
+
+[← Back to SKILL.md](../SKILL.md)

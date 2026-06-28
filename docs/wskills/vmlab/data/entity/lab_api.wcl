@@ -1,0 +1,26 @@
+entity lab_api {
+  name     = "Lab"
+  kind     = "wscript API object"
+  summary  = "The lab handle passed to fn main(lab: Lab) / fn handle(event, lab) — find VMs and segments, log."
+  related  = [vm_api, seg_api, wscript_matching, provisions]
+  audience = :both
+  body {
+    table {
+      header = ["Method", "Returns", "Notes"]
+      rows = [
+        ["`lab.name()`", "`string`", "Lab name from vmlab.wcl"],
+        ["`lab.log(msg: string)`", "`unit`", "Lab log + live CLI stream"],
+        ["`lab.vm(name: string)`", "`Result[Vm, string]`", "Err if not defined"],
+        ["`lab.vms()`", "`List[Vm]`", "All VMs"],
+        ["`lab.segment(name: string)`", "`Result[Segment, string]`", "Err if not declared"],
+      ]
+    }
+    h2 "Free functions"
+    table {
+      header = ["Function", "Notes"]
+      rows = [
+        ["`vmlab::sleep_ms(ms: int)`", "Sleep; call module-qualified (or `use vmlab::sleep_ms`). Prefer `wait_*` methods over fixed sleeps."],
+      ]
+    }
+  }
+}

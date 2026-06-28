@@ -1,0 +1,16 @@
+entity provision_block {
+  name     = "provision {} block"
+  kind     = "WCL block"
+  summary  = "Names a wscript file that runs on `vmlab up`; scoping it to VMs gates their depends_on."
+  related  = [provisions, on_handler, wscript_overview, labs]
+  audience = :both
+  body {
+    p "A `provision {}` block runs a wscript file on `vmlab up`, in declaration order."
+    code "wcl" { source = <<'SRC'
+provision "scripts/setup.ws" { }                     // runs on `vmlab up`, in order
+provision "scripts/join.ws"  { vms = ["client01"] }  // scoped: gates depends_on on these VMs
+SRC
+    }
+    p "**Provision failures fail `vmlab up`.** A scoped provision (`vms = [...]`) gates `depends_on` on those VMs: dependents wait for the provision to finish."
+  }
+}
