@@ -200,6 +200,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          # Only the staged binaries — not the image job's .dockerbuild record.
+          pattern: bin-*
       - name: Tag
         run: |
           V="${{ needs.version.outputs.version }}"
@@ -245,6 +247,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@v6
+        # Skip the .dockerbuild build-record artifact (the release job would
+        # otherwise try to download it).
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
         with:
           context: .
           file: Containerfile

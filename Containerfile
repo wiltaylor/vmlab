@@ -38,7 +38,9 @@ WORKDIR /build/vmlab
 COPY . .
 # Supply the built web assets so rust-embed can bake them into vmlab-web.
 COPY --from=web /web/dist ./web-ui/dist
-RUN cargo build --release --locked --features web --bin vmlab --bin vmlab-web
+# No --locked: release CI stamps the package version into Cargo.toml, which the
+# lockfile would otherwise reject. Deps are still pinned by Cargo.lock.
+RUN cargo build --release --features web --bin vmlab --bin vmlab-web
 
 # ---- runtime ----------------------------------------------------------------
 FROM debian:bookworm-slim
