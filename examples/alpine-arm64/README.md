@@ -23,7 +23,7 @@ ssh vmlab@localhost -p 12222      # password: vmlab
 vmlab down
 ```
 
-The provision script (`scripts/setup.wscript`) waits for the guest agent and
+The provision script (`scripts/setup.ws`) waits for the guest agent and
 logs the guest's `uname -m` (should print `aarch64`) and Alpine release.
 Watch it with `vmlab logs`.
 

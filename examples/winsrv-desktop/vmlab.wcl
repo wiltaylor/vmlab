@@ -27,7 +27,7 @@ lab "winsrv-desktop" {
   vm "winsrv" {
     template = "x86_64/windows-server-2025"
     cpus     = 4
-    memory   = "8G"
+    memory   = 8GiB
     nic { segment = "lan" ip = "10.80.0.10" }
     // gui = true is inherited from the lab; set `gui = false` here to keep
     // this one VM headless while still reachable via `vmlab console`.

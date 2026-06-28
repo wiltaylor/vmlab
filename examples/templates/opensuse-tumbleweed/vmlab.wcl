@@ -20,8 +20,8 @@ template "opensuse-tumbleweed" {
   profile  = "linux-modern"
   firmware = "seabios"
   cpus     = 2
-  memory   = "4G"
-  disk     = "20G"
+  memory   = 4GiB
+  disk     = 20GiB
 
   source "qcow2" {
     url    = "https://download.opensuse.org/tumbleweed/appliances/openSUSE-Tumbleweed-Minimal-VM.x86_64-1.0.0-Cloud-Snapshot20260613.qcow2"
@@ -31,5 +31,5 @@ template "opensuse-tumbleweed" {
   media { kind = "iso" from = "./cloudinit/" label = "CIDATA" }
   nic { nat = true }
 
-  provision "scripts/install.wscript" { }
+  provision "scripts/install.ws" { }
 }

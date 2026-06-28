@@ -26,9 +26,9 @@ lab "alpine-arm64" {
 
   vm "alp" {
     template = "aarch64/alpine-3.23"
-    memory   = "1G"
+    memory   = 1GiB
     nic { segment = "lan" }                        // dynamic DHCP lease
   }
 
-  provision "scripts/setup.wscript" { }
+  provision "scripts/setup.ws" { }
 }

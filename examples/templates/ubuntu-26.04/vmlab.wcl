@@ -18,8 +18,8 @@ template "ubuntu-26.04" {
   profile  = "linux-modern"
   firmware = "seabios"
   cpus     = 2
-  memory   = "4G"
-  disk     = "20G"
+  memory   = 4GiB
+  disk     = 20GiB
 
   source "qcow2" {
     url    = "https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-amd64.img"
@@ -29,5 +29,5 @@ template "ubuntu-26.04" {
   media { kind = "iso" from = "./cloudinit/" label = "CIDATA" }
   nic { nat = true }
 
-  provision "scripts/install.wscript" { }
+  provision "scripts/install.ws" { }
 }

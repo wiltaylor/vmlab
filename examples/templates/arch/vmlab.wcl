@@ -19,8 +19,8 @@ template "arch" {
   profile  = "linux-modern"
   firmware = "seabios"
   cpus     = 2
-  memory   = "4G"
-  disk     = "20G"
+  memory   = 4GiB
+  disk     = 20GiB
 
   source "qcow2" {
     url    = "https://geo.mirror.pkgbuild.com/images/v20260601.539459/Arch-Linux-x86_64-cloudimg-20260601.539459.qcow2"
@@ -30,5 +30,5 @@ template "arch" {
   media { kind = "iso" from = "./cloudinit/" label = "CIDATA" }
   nic { nat = true }
 
-  provision "scripts/install.wscript" { }
+  provision "scripts/install.ws" { }
 }

@@ -19,7 +19,7 @@ lab "ad-lab" {
   vm "dc01" {
     template = "x86_64/windows-server-2025"
     cpus     = 4
-    memory   = "8G"
+    memory   = 8GiB
     nic { segment = "corp" ip = "10.50.0.10" }
   }
 
@@ -34,8 +34,8 @@ lab "ad-lab" {
     nic { nat = true }
   }
 
-  provision "scripts/setup.wscript" { vms = ["dc01"] }
+  provision "scripts/setup.ws" { vms = ["dc01"] }
 
-  on "vm.crashed"    { run = "scripts/collect-dumps.wscript" }
-  on "host.disk_low" { run = "scripts/alert.wscript" }
+  on "vm.crashed"    { run = "scripts/collect-dumps.ws" }
+  on "host.disk_low" { run = "scripts/alert.ws" }
 }

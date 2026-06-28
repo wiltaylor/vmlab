@@ -29,9 +29,9 @@ lab "riscv64-ubuntu" {
 
   vm "ubu" {
     template = "riscv64/ubuntu-24.04"
-    memory   = "2G"
+    memory   = 2GiB
     nic { segment = "lan" }                        // dynamic DHCP lease
   }
 
-  provision "scripts/setup.wscript" { }
+  provision "scripts/setup.ws" { }
 }

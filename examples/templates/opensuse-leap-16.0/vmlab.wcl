@@ -18,8 +18,8 @@ template "opensuse-leap" {
   profile  = "linux-modern"
   firmware = "seabios"
   cpus     = 2
-  memory   = "4G"
-  disk     = "20G"
+  memory   = 4GiB
+  disk     = 20GiB
 
   source "qcow2" {
     url    = "https://download.opensuse.org/distribution/leap/16.0/appliances/Leap-16.0-Minimal-VM.x86_64-Cloud-Build18.3.qcow2"
@@ -29,5 +29,5 @@ template "opensuse-leap" {
   media { kind = "iso" from = "./cloudinit/" label = "CIDATA" }
   nic { nat = true }
 
-  provision "scripts/install.wscript" { }
+  provision "scripts/install.ws" { }
 }

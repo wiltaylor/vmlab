@@ -18,8 +18,8 @@ template "almalinux-10" {
   profile  = "linux-modern"
   firmware = "seabios"
   cpus     = 2
-  memory   = "4G"
-  disk     = "20G"
+  memory   = 4GiB
+  disk     = 20GiB
 
   source "qcow2" {
     url    = "https://repo.almalinux.org/almalinux/10/cloud/x86_64/images/AlmaLinux-10-GenericCloud-10.2-20260526.0.x86_64.qcow2"
@@ -29,5 +29,5 @@ template "almalinux-10" {
   media { kind = "iso" from = "./cloudinit/" label = "CIDATA" }
   nic { nat = true }
 
-  provision "scripts/install.wscript" { }
+  provision "scripts/install.ws" { }
 }

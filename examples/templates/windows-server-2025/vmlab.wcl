@@ -15,8 +15,8 @@ template "windows-server-2025" {
   version = "26100.1742"
   profile = "windows-server"
   cpus    = 4
-  memory  = "8G"
-  disk    = "60G"
+  memory  = 8GiB
+  disk    = 60GiB
 
   source "iso" {
     url    = "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso"
@@ -26,5 +26,5 @@ template "windows-server-2025" {
   media { kind = "iso" from = "./unattend/" label = "UNATTEND" }
   nic { nat = true }
 
-  provision "scripts/install.wscript" { }
+  provision "scripts/install.ws" { }
 }

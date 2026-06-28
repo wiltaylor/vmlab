@@ -23,19 +23,19 @@ lab "mixed-lab" {
   vm "winsrv" {
     template = "x86_64/windows-server-2025"
     cpus     = 4
-    memory   = "8G"
+    memory   = 8GiB
     nic { segment = "lan" ip = "10.70.0.10" }       // DHCP reservation
     share { host = "./shared" guest = "S:" }        // auto-mounted when ready
   }
 
   vm "nix01" {
     template   = "x86_64/ubuntu-24.04"
-    memory     = "2G"
+    memory     = 2GiB
     depends_on = ["winsrv"]
     nic { segment = "lan" }                         // dynamic lease
   }
 
-  provision "scripts/setup.wscript" { }
+  provision "scripts/setup.ws" { }
 
-  on "vm.crashed" { run = "scripts/on-crash.wscript" }
+  on "vm.crashed" { run = "scripts/on-crash.ws" }
 }
