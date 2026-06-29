@@ -16,4 +16,11 @@ lab "demo" {
     memory   = 1GiB
     nic { segment = "lan" }
   }
+
+  vm "alpine2" {
+    template = "ghcr.io/vmlabdev/vmlab-templates/alpine-3.23"
+    arch     = "x86_64"   // OCI registry refs are multi-arch — pick one
+    memory   = 1GiB
+    nic { segment = "lan" }
+  }
 }
