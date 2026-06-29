@@ -4,6 +4,7 @@ import Login from "./components/Login";
 import Sidebar from "./components/Sidebar";
 import LabView from "./components/LabView";
 import NetworkView from "./components/NetworkView";
+import LogsView from "./components/LogsView";
 import MachineView from "./components/MachineView";
 import Toast from "./components/Toast";
 
@@ -27,6 +28,9 @@ export default function App() {
             </Show>
             <Show when={state.view.kind === "network"}>
               <NetworkView />
+            </Show>
+            <Show when={state.view.kind === "logs"}>
+              <LogsView />
             </Show>
             <Show when={state.view.kind === "vm"}>
               <MachineView />

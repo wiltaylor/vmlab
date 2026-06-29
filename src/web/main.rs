@@ -7,6 +7,7 @@ mod api;
 mod assets;
 mod auth;
 mod events;
+mod logs;
 mod state;
 mod vnc;
 
@@ -207,6 +208,7 @@ async fn main() -> ExitCode {
                 "/api/labs/{lab}/snapshots",
                 web::post().to(api::snapshot_take),
             )
+            .route("/api/labs/{lab}/logs", web::get().to(logs::logs))
             .route("/api/labs/{lab}/{action}", web::post().to(api::lab_action))
             .route("/api/labs/{lab}", web::get().to(api::lab_status))
             // Live streams.

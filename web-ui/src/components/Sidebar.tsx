@@ -4,13 +4,14 @@ import {
   selectLab,
   showLab,
   showNetwork,
+  showLogs,
   showVm,
   doLogout,
   look,
   osOf,
   archOf,
 } from "../store";
-import { Chevron, Check, Grid, Network } from "./icons";
+import { Chevron, Check, Grid, Network, Logs } from "./icons";
 
 export default function Sidebar() {
   const [menu, setMenu] = createSignal(false);
@@ -96,6 +97,19 @@ export default function Sidebar() {
             <span class="nimeta">
               {cur() ? `${cur()!.segments.length} segments` : ""}
             </span>
+          </span>
+        </button>
+        <button
+          class="navitem"
+          classList={{ on: state.view.kind === "logs" }}
+          onClick={showLogs}
+        >
+          <span class="niic">
+            <Logs />
+          </span>
+          <span class="nitext">
+            <span class="niname">logs</span>
+            <span class="nimeta">live stream</span>
           </span>
         </button>
 

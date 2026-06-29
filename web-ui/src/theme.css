@@ -173,3 +173,26 @@
 .snapopt:hover{border-color:var(--border-strong);background:var(--bg-3)}
 .snapgo{width:15px;height:15px;color:var(--fg-3);margin-left:auto;flex:none}
 @media(max-width:1080px){.vmlayout{grid-template-columns:1fr}.statgrid{grid-template-columns:1fr 1fr}}
+
+/* --- logs view --- */
+.logctl{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.logsel,.logq{height:30px;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--fg-0);font-family:var(--font-mono);font-size:12px;outline:none;transition:border-color 80ms var(--ease-out)}
+.logsel{padding:0 8px}
+.logq{padding:0 10px;width:180px}
+.logsel:focus,.logq:focus{border-color:var(--accent)}
+.logbtn{height:30px;padding:0 11px;border-radius:var(--r-sm);font-family:var(--font-mono);font-size:12px;border:1px solid var(--border);background:var(--bg-2);color:var(--fg-1);cursor:pointer;transition:border-color 80ms var(--ease-out),color 80ms,background 80ms}
+.logbtn:hover{border-color:var(--border-strong);color:var(--fg-0)}
+.logbtn.on{border-color:var(--accent);color:var(--accent-fg);background:var(--accent-bg)}
+.logpane{height:calc(100vh - 156px);min-height:240px;overflow-y:auto;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-md);font-family:var(--font-mono);font-size:12px;line-height:1.55;padding:8px 0}
+.logrow{display:grid;grid-template-columns:64px 92px 56px 1fr;gap:10px;padding:1px 16px;align-items:baseline}
+.logrow:hover{background:var(--bg-2)}
+.logts{color:var(--fg-3);font-size:11px;text-align:right;white-space:nowrap}
+.logsrc{color:var(--fg-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.logsrc-lab{color:var(--success-fg)}
+.logstream{font-size:10px;text-transform:uppercase;letter-spacing:0.04em;color:var(--fg-3);white-space:nowrap}
+.ls-events{color:var(--accent-fg)}
+.ls-serial{color:var(--info-fg)}
+.ls-qemu{color:var(--warning-fg)}
+.ls-lab{color:var(--success-fg)}
+.logmsg{color:var(--fg-1);white-space:pre-wrap;overflow-wrap:anywhere}
+.logempty{padding:20px 16px;color:var(--fg-3);font-family:var(--font-mono);font-size:12.5px}

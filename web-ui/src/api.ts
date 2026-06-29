@@ -143,3 +143,15 @@ export interface DaemonEvent {
   data: any;
   ts: string;
 }
+
+// One line from the lab's logs (lab events + each VM's serial/qemu/swtpm),
+// streamed over /api/labs/{lab}/logs. `ts` is set only for events.jsonl lines.
+export interface LogEntry {
+  source: string; // "lab" or the VM name
+  stream: string; // "events" | "lab" | "serial" | "qemu" | "swtpm"
+  ts?: string | null;
+  text: string;
+}
+
+export const logsWsUrl = (lab: string): string =>
+  wsUrl(`/api/labs/${encodeURIComponent(lab)}/logs`);

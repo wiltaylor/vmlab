@@ -7,7 +7,7 @@ import { createSignal } from "solid-js";
 import * as api from "./api";
 import type { LabEntry, LabStatus, Vm, DaemonEvent } from "./api";
 
-export type ViewKind = "lab" | "network" | "vm";
+export type ViewKind = "lab" | "network" | "vm" | "logs";
 
 interface State {
   ready: boolean; // initial auth probe done
@@ -129,6 +129,9 @@ export function showLab() {
 }
 export function showNetwork() {
   setState("view", { kind: "network", vm: null });
+}
+export function showLogs() {
+  setState("view", { kind: "logs", vm: null });
 }
 export function showVm(vm: string) {
   setState("view", { kind: "vm", vm });

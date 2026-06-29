@@ -809,22 +809,13 @@ fn format_log_line(
         return line.to_string();
     };
     let ts = ev.ts.with_timezone(&chrono::Local).format("%H:%M:%S");
-    let data = match ev.data.as_object() {
-        Some(map) => map
-            .iter()
-            .map(|(k, v)| match v {
-                Value::String(s) => format!("{k}={s}"),
-                _ => format!("{k}={v}"),
-            })
-            .collect::<Vec<_>>()
-            .join(" "),
-        None if ev.data.is_null() => String::new(),
-        None => ev.data.to_string(),
-    };
+    // Flatten the event the same way the web log stream does.
+    let summary = crate::logs::format_event(&ev);
+    let (event, data) = summary.split_once(' ').unwrap_or((summary.as_str(), ""));
     if color {
-        format!("\x1b[2m{ts}\x1b[0m  \x1b[36m{:<16}\x1b[0m {data}", ev.event)
+        format!("\x1b[2m{ts}\x1b[0m  \x1b[36m{event:<16}\x1b[0m {data}")
     } else {
-        format!("{ts}  {:<16} {data}", ev.event)
+        format!("{ts}  {event:<16} {data}")
     }
     .trim_end()
     .to_string()

@@ -10,6 +10,7 @@
 pub mod cli;
 mod config;
 mod labd;
+pub mod logs;
 mod media;
 mod net;
 mod oci;
