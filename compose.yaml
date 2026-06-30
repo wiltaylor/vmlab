@@ -32,7 +32,14 @@ services:
       - ./docker/lab:/lab
       # Persistent template store (templates are pulled on first `up`).
       - vmlab-templates:/root/.local/share/vmlab/templates
+      # Lab working data (disk clones, built media, lab state). Kept on a
+      # container-native volume rather than the ./docker/lab bind mount so the
+      # heavy disk I/O stays fast — this matters a lot on Windows, where bind
+      # mounts go over a slow virtiofs/9p bridge (issue #2). Matches the image's
+      # VMLAB_WORK_DIR default.
+      - vmlab-work:/var/lib/vmlab/work
     restart: unless-stopped
 
 volumes:
   vmlab-templates:
+  vmlab-work:

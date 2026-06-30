@@ -5,6 +5,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use sha2::{Digest, Sha256};
 
 /// Name of the lab definition file, located by walking up from cwd.
 pub const LAB_FILE: &str = "vmlab.wcl";
@@ -89,9 +90,49 @@ pub fn find_lab_root(start: &Path) -> Result<PathBuf> {
     );
 }
 
-/// Lab-local working data directory (`<repo>/.vmlab/`). Created on demand.
+/// Lab-local working data directory — the disk clones, built media, TPM
+/// state, and persisted lab state. Defaults to `<lab>/.vmlab/`, beside the
+/// lab file.
+///
+/// `VMLAB_WORK_DIR` relocates it to a per-lab subdirectory under that base
+/// instead. This keeps the heavy, write-churning working data off a slow
+/// filesystem while the lab file itself stays put: in Docker on Windows the
+/// lab directory is a bind mount over a virtiofs/9p bridge, and writing disk
+/// clones across it is painfully slow (issue #2) — pointing `VMLAB_WORK_DIR`
+/// at a container-native named volume fixes that. The lab file stays editable
+/// on the host. Created on demand by the callers that write into it.
 pub fn lab_local_dir(lab_root: &Path) -> PathBuf {
-    lab_root.join(LAB_DIR)
+    let base = env::var_os("VMLAB_WORK_DIR")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from);
+    lab_local_dir_in(base.as_deref(), lab_root)
+}
+
+/// The override-aware core of [`lab_local_dir`], split out so it can be tested
+/// without mutating process-global environment.
+fn lab_local_dir_in(base: Option<&Path>, lab_root: &Path) -> PathBuf {
+    match base {
+        // A single relocated base may hold several labs, so namespace each by
+        // its root: `<basename>-<hash>` keeps it human-recognisable while the
+        // hash of the canonical path guarantees no two distinct labs collide.
+        Some(base) => {
+            let canon = lab_root
+                .canonicalize()
+                .unwrap_or_else(|_| lab_root.to_path_buf());
+            let name = lab_root
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("lab");
+            base.join(format!("{name}-{}", short_hash(&canon)))
+        }
+        None => lab_root.join(LAB_DIR),
+    }
+}
+
+/// 12 hex chars of the SHA-256 of a path — a stable, collision-resistant tag.
+fn short_hash(p: &Path) -> String {
+    let digest = Sha256::digest(p.to_string_lossy().as_bytes());
+    hex::encode(&digest[..6])
 }
 
 /// Ensure a directory exists with private permissions.
@@ -151,6 +192,38 @@ mod tests {
     fn find_lab_root_fails_cleanly() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(find_lab_root(tmp.path()).is_err());
+    }
+
+    #[test]
+    fn lab_local_dir_defaults_beside_lab() {
+        assert_eq!(
+            lab_local_dir_in(None, Path::new("/some/lab")),
+            PathBuf::from("/some/lab/.vmlab")
+        );
+    }
+
+    #[test]
+    fn lab_local_dir_override_relocates_and_namespaces() {
+        let base = Path::new("/work");
+        // Nonexistent roots can't canonicalize; the raw path is hashed, which
+        // is fine — it just needs to be stable and distinct per lab.
+        let alpha = lab_local_dir_in(Some(base), Path::new("/labs/alpha"));
+        let beta = lab_local_dir_in(Some(base), Path::new("/labs/beta"));
+        assert!(alpha.starts_with("/work"));
+        assert!(
+            alpha
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("alpha-"),
+            "{alpha:?}"
+        );
+        // Distinct labs never collide, and the mapping is stable per root.
+        assert_ne!(alpha, beta);
+        assert_eq!(
+            alpha,
+            lab_local_dir_in(Some(base), Path::new("/labs/alpha"))
+        );
     }
 
     #[test]

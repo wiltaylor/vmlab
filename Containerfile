@@ -70,9 +70,18 @@ COPY --from=builder /build/vmlab/target/release/vmlab-web /usr/local/bin/vmlab-w
 
 # Documented volume mounts (PRD §14):
 #   /root/.local/share/vmlab/templates  — the template store
+#   /var/lib/vmlab/work                  — lab working data (disk clones, media)
 #   /lab                                — the lab directory (holds vmlab.wcl)
 # Everything else is container-ephemeral by design.
-VOLUME ["/root/.local/share/vmlab/templates"]
+#
+# The lab's working data (linked disk clones, built ISOs, TPM + lab state) is
+# normally written to `<lab>/.vmlab`. With /lab bind-mounted from the host that
+# puts heavy, write-churning I/O on the host filesystem — and on Windows that
+# bind mount is a slow virtiofs/9p bridge, so disk clones crawl (issue #2).
+# VMLAB_WORK_DIR relocates that data onto a container-native volume instead,
+# leaving only the editable vmlab.wcl on the (read-mostly) bind mount.
+ENV VMLAB_WORK_DIR=/var/lib/vmlab/work
+VOLUME ["/root/.local/share/vmlab/templates", "/var/lib/vmlab/work"]
 WORKDIR /lab
 EXPOSE 7878
 
