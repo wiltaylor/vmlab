@@ -38,7 +38,7 @@ use anyhow::{Context, Result, bail};
 
 pub use catalog::list_repositories;
 pub use chunking::{ChunkInfo, ChunkSet, DEFAULT_CHUNK_SIZE};
-pub use client::{Registry, Transport};
+pub use client::{PullProgress, Registry, Transport, ensure_registry_template};
 pub use manifest::{Descriptor, ImageIndex, Manifest};
 pub use media_types::ARTIFACT_TYPE_TEMPLATE;
 pub use reference::{Reference, with_version_tag};

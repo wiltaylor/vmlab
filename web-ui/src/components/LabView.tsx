@@ -15,6 +15,9 @@ import {
   osOf,
   archOf,
   fmtMem,
+  fmtBytes,
+  currentPulls,
+  type Pull,
 } from "../store";
 import * as I from "./icons";
 
@@ -26,6 +29,7 @@ function fmtTime(t: string): string {
 
 export default function LabView() {
   const s = () => state.status;
+  const pulls = () => currentPulls();
   const running = () => s()?.vms.filter((v) => v.state === "running").length ?? 0;
   const total = () => s()?.vms.length ?? 0;
   const vcpu = () => s()?.vms.reduce((a, v) => a + (v.cpus ?? 0), 0) ?? 0;
@@ -61,7 +65,15 @@ export default function LabView() {
       when={s()}
       fallback={
         <div class="body">
-          <div class="csub">No lab selected, or the lab daemon isn't reachable.</div>
+          <Show
+            when={pulls().length}
+            fallback={
+              <div class="csub">No lab selected, or the lab daemon isn't reachable.</div>
+            }
+          >
+            <PullPanel pulls={pulls()} />
+            <div class="csub">Starting the lab — downloading templates…</div>
+          </Show>
         </div>
       }
     >
@@ -98,6 +110,10 @@ export default function LabView() {
       </header>
 
       <div class="body">
+        <Show when={pulls().length}>
+          <PullPanel pulls={pulls()} />
+        </Show>
+
         <div class="statgrid">
           <Stat icon={<I.Servers />} k="Machines up" v={String(running())} u={`/ ${total()}`} />
           <Stat icon={<I.Cpu />} k="Allocated vCPU" v={vcpu() ? String(vcpu()) : "—"} u="cores" />
@@ -197,6 +213,48 @@ export default function LabView() {
         </div>
       </Show>
     </Show>
+  );
+}
+
+function PullPanel(p: { pulls: Pull[] }) {
+  return (
+    <div class="pullbox">
+      <h3 class="sectitle">Downloading templates</h3>
+      <For each={p.pulls}>
+        {(pl) => (
+          <div class="pull">
+            <div class="pullhd">
+              <span class="pullvm">{pl.vm}</span>
+              <span class="pullref">{pl.reference}</span>
+              <span class="pullpct">
+                {pl.status === "checking"
+                  ? "checking…"
+                  : pl.status === "error"
+                    ? "failed"
+                    : `${pl.percent}%`}
+              </span>
+            </div>
+            <div class="pullbar">
+              <div
+                class="pullfill"
+                classList={{
+                  "pullfill-indet": pl.status === "checking",
+                  "pullfill-err": pl.status === "error",
+                }}
+                style={pl.status === "checking" ? "" : `width:${pl.status === "error" ? 100 : pl.percent}%`}
+              />
+            </div>
+            <div class="pullsub" classList={{ "c-dan": pl.status === "error" }}>
+              {pl.status === "error"
+                ? pl.error
+                : pl.status === "checking"
+                  ? "Resolving template…"
+                  : `${fmtBytes(pl.bytesDone)} / ${fmtBytes(pl.bytesTotal)}`}
+            </div>
+          </div>
+        )}
+      </For>
+    </div>
   );
 }
 

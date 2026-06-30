@@ -66,71 +66,19 @@ impl LabRuntime {
                 TemplateRef::Registry { reference } => {
                     // A registry reference is pulled on first `up` if absent
                     // from the store, never re-pulled implicitly (PRD §6.4).
-                    // Templates live at `host/owner/[group/]name:VERSION` — the
-                    // store name is the last repository path component. The tag
-                    // may be a concrete version or a moving alias (`latest` /
-                    // `latest-prerelease`): a concrete version already cached is
-                    // used offline; otherwise resolve the alias to its real
-                    // version (a cheap manifest fetch) and only pull the disk
-                    // when that version isn't already in the store.
+                    // The supervisor pre-pulls (streaming progress to the UI)
+                    // before spawning this daemon, so by the time we get here
+                    // the template is usually cached and this resolves offline;
+                    // the shared helper still pulls as a fallback if not.
                     let arch = vm_cfg.arch.clone().ok_or_else(|| {
                         anyhow!(
                             "vm \"{}\": registry template needs an explicit arch",
                             vm_cfg.name
                         )
                     })?;
-                    let registry = crate::oci::Registry::new(reference)?;
-                    let store_name = registry
-                        .repository()
-                        .rsplit('/')
-                        .next()
-                        .unwrap_or_default()
-                        .to_string();
-                    let resolved = match store.resolve(&arch, &store_name, Some(registry.tag())) {
-                        // Tag is a concrete, already-cached version: stay offline.
-                        Ok(r) => r,
-                        Err(_) => {
-                            // Not cached. Resolve the requested tag against the
-                            // registry's published tags first: a build-counter
-                            // prefix (e.g. 26100.1742) resolves to the latest
-                            // 26100.1742.<N>; a moving alias or exact tag is used
-                            // as-is. Then resolve that to its real version without
-                            // downloading the disk, and only pull when absent.
-                            let pull_tag = match registry.list_tags().await {
-                                Ok(tags) => crate::template::store::resolve_version_pin(
-                                    &tags,
-                                    registry.tag(),
-                                )
-                                .unwrap_or_else(|| registry.tag().to_string()),
-                                Err(_) => registry.tag().to_string(),
-                            };
-                            let registry = if pull_tag.as_str() == registry.tag() {
-                                registry
-                            } else {
-                                crate::oci::Registry::new(&crate::oci::with_version_tag(
-                                    reference, &pull_tag,
-                                )?)?
-                            };
-                            let real = registry
-                                .resolve_version(Some(&arch))
-                                .await
-                                .with_context(|| format!("resolving {reference}"))?;
-                            match store.resolve(&arch, &store_name, Some(&real)) {
-                                // Resolved tag points at an already-cached version.
-                                Ok(r) => r,
-                                Err(_) => {
-                                    let work = crate::paths::template_store_dir().join(".oci-pull");
-                                    std::fs::create_dir_all(&work)?;
-                                    let meta = registry
-                                        .pull(Some(&arch), &store, &work, false)
-                                        .await
-                                        .with_context(|| format!("pulling {reference}"))?;
-                                    let _ = std::fs::remove_dir_all(&work);
-                                    store.resolve(&meta.arch, &meta.name, Some(&meta.version))?
-                                }
-                            }
-                        }
-                    };
+                    let resolved =
+                        crate::oci::ensure_registry_template(reference, &arch, &store, &mut |_| {})
+                            .await?;
                     (Some(resolved.disk_path.clone()), Some(resolved.meta), None)
                 }
             };

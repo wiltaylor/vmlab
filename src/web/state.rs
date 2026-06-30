@@ -184,11 +184,6 @@ impl AppState {
         }
         names
     }
-
-    /// A live lab client for the events/VNC bridges (public wrapper).
-    pub async fn lab_client_pub(&self, lab: &str) -> Result<Client, String> {
-        self.lab_client(lab).await
-    }
 }
 
 fn prune(sessions: &mut HashMap<String, Instant>) {

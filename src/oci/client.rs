@@ -43,6 +43,18 @@ pub struct Fetched {
     pub body: Vec<u8>,
 }
 
+/// Progress of a pull's chunk-download phase, reported to the callback passed
+/// to [`Registry::pull_with_progress`]. Byte counts are compressed (i.e. what
+/// is actually transferred); `chunk` counts completed chunks (0 at the start,
+/// `chunks` when done).
+#[derive(Debug, Clone, Copy)]
+pub struct PullProgress {
+    pub chunk: usize,
+    pub chunks: usize,
+    pub bytes_done: u64,
+    pub bytes_total: u64,
+}
+
 /// The distribution-API surface push/pull is written against. Digests are
 /// `sha256:<hex>` strings; `repository` is the repo path under the host.
 #[async_trait::async_trait]
@@ -370,6 +382,23 @@ impl Registry {
         work_dir: &Path,
         overwrite: bool,
     ) -> Result<TemplateMeta> {
+        self.pull_with_progress(arch, dest_store, work_dir, overwrite, &mut |_| {})
+            .await
+    }
+
+    /// [`pull`](Self::pull) that reports chunk-download progress. `progress`
+    /// is called once before the first chunk (`chunk == 0`) and after each
+    /// chunk completes, carrying the compressed bytes downloaded so far out
+    /// of the manifest's total — enough for a UI progress bar (PRD §6.4,
+    /// issue #1). Byte totals are the compressed (downloaded) sizes.
+    pub async fn pull_with_progress(
+        &self,
+        arch: Option<&str>,
+        dest_store: &TemplateStore,
+        work_dir: &Path,
+        overwrite: bool,
+        progress: &mut (dyn FnMut(PullProgress) + Send),
+    ) -> Result<TemplateMeta> {
         let repo = &self.reference.repository;
 
         // Steps 1-3: resolve the tag to the per-arch manifest + metadata
@@ -380,8 +409,18 @@ impl Registry {
         let chunks_dir = work_dir.join("chunks");
         std::fs::create_dir_all(&chunks_dir)
             .with_context(|| format!("cannot create {}", chunks_dir.display()))?;
+        let ordered = manifest.layers_in_order();
+        let chunks = ordered.len();
+        let bytes_total: u64 = ordered.iter().map(|d| d.size).sum();
+        let mut bytes_done: u64 = 0;
+        progress(PullProgress {
+            chunk: 0,
+            chunks,
+            bytes_done,
+            bytes_total,
+        });
         let mut chunk_paths = Vec::new();
-        for (i, layer) in manifest.layers_in_order().into_iter().enumerate() {
+        for (i, layer) in ordered.into_iter().enumerate() {
             let bytes = self
                 .transport
                 .get_blob(repo, &layer.digest)
@@ -399,6 +438,13 @@ impl Registry {
             std::fs::write(&path, &bytes)
                 .with_context(|| format!("cannot write {}", path.display()))?;
             chunk_paths.push(path);
+            bytes_done += layer.size;
+            progress(PullProgress {
+                chunk: i + 1,
+                chunks,
+                bytes_done,
+                bytes_total,
+            });
         }
 
         // 5. Assemble + verify the whole-image digest.
@@ -427,6 +473,68 @@ impl Registry {
         );
         Ok(meta)
     }
+}
+
+/// Resolve a `registry` template reference to a cached store entry, pulling it
+/// (with progress) only when it isn't already present (PRD §6.4). This mirrors
+/// the resolution a first `up` performs, factored out so both the lab build
+/// (no progress) and the supervisor's pre-pull (streaming progress to the UI,
+/// issue #1) share one implementation.
+///
+/// A concrete tag already in the store is used offline. A moving alias
+/// (`latest` / `latest-prerelease`) or a build-counter prefix is resolved
+/// against the registry's published tags, then to its real version, and the
+/// disk is pulled only when that version is absent. `progress` fires during the
+/// chunk download (never when the template is already cached).
+pub async fn ensure_registry_template(
+    reference: &str,
+    arch: &str,
+    store: &TemplateStore,
+    progress: &mut (dyn FnMut(PullProgress) + Send),
+) -> Result<crate::template::store::ResolvedTemplate> {
+    let registry = Registry::new(reference)?;
+    // Templates live at `host/owner/[group/]name:VERSION`; the store name is
+    // the last repository path component.
+    let store_name = registry
+        .repository()
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    // Tag is a concrete, already-cached version: stay offline.
+    if let Ok(r) = store.resolve(arch, &store_name, Some(registry.tag())) {
+        return Ok(r);
+    }
+    // Not cached. Resolve the requested tag against the registry's published
+    // tags first: a build-counter prefix (e.g. 26100.1742) resolves to the
+    // latest 26100.1742.<N>; a moving alias or exact tag is used as-is. Then
+    // resolve that to its real version without downloading the disk, and only
+    // pull when absent.
+    let pull_tag = match registry.list_tags().await {
+        Ok(tags) => crate::template::store::resolve_version_pin(&tags, registry.tag())
+            .unwrap_or_else(|| registry.tag().to_string()),
+        Err(_) => registry.tag().to_string(),
+    };
+    let registry = if pull_tag.as_str() == registry.tag() {
+        registry
+    } else {
+        Registry::new(&super::reference::with_version_tag(reference, &pull_tag)?)?
+    };
+    let real = registry
+        .resolve_version(Some(arch))
+        .await
+        .with_context(|| format!("resolving {reference}"))?;
+    if let Ok(r) = store.resolve(arch, &store_name, Some(&real)) {
+        return Ok(r);
+    }
+    let work = crate::paths::template_store_dir().join(".oci-pull");
+    std::fs::create_dir_all(&work)?;
+    let meta = registry
+        .pull_with_progress(Some(arch), store, &work, false, progress)
+        .await
+        .with_context(|| format!("pulling {reference}"))?;
+    let _ = std::fs::remove_dir_all(&work);
+    store.resolve(&meta.arch, &meta.name, Some(&meta.version))
 }
 
 /// `sha256:<hex>` of a byte slice.
@@ -1047,6 +1155,64 @@ mod tests {
         // disk reassembled identically
         let resolved = store.resolve("x86_64", "alpine", Some("3.20")).unwrap();
         assert_eq!(std::fs::read(&resolved.disk_path).unwrap(), disk);
+    }
+
+    #[tokio::test]
+    async fn pull_reports_progress() {
+        let fake = std::sync::Arc::new(FakeRegistry::default());
+        let work = tempfile::tempdir().unwrap();
+
+        // ~5 MiB disk pushed in 1 MiB chunks → several layers to report on.
+        let disk: Vec<u8> = (0..(5u32 * 1024 * 1024)).map(|i| (i % 251) as u8).collect();
+        let tdir = work.path().join("tmpl");
+        let m = meta("x86_64");
+        make_template(&tdir, &m, &disk);
+        let reg = registry_with_fake("ghcr.io/owner/alpine:3.20", fake.clone());
+        reg.push(
+            &tdir,
+            1024 * 1024,
+            "x86_64",
+            &work.path().join("push"),
+            None,
+            Some("latest"),
+        )
+        .await
+        .unwrap();
+
+        let store_root = work.path().join("store");
+        std::fs::create_dir_all(&store_root).unwrap();
+        let store = TemplateStore::new(store_root.clone());
+        let reg2 = registry_with_fake("ghcr.io/owner/alpine:3.20", fake.clone());
+        let mut updates: Vec<PullProgress> = Vec::new();
+        reg2.pull_with_progress(
+            Some("x86_64"),
+            &store,
+            &store_root.join(".oci-pull"),
+            false,
+            &mut |p| updates.push(p),
+        )
+        .await
+        .unwrap();
+
+        // An initial 0-of-N report, then one per chunk.
+        let first = updates.first().copied().expect("at least one update");
+        let last = updates.last().copied().unwrap();
+        assert_eq!(first.chunk, 0);
+        assert_eq!(first.bytes_done, 0);
+        assert!(last.chunks > 1, "5 MiB / 1 MiB should be several chunks");
+        assert_eq!(
+            updates.len(),
+            last.chunks + 1,
+            "0-report plus one per chunk"
+        );
+        assert_eq!(last.chunk, last.chunks, "final report is complete");
+        assert_eq!(last.bytes_done, last.bytes_total);
+        assert!(last.bytes_total > 0);
+        // Monotonic non-decreasing byte counts, consistent chunk total.
+        for w in updates.windows(2) {
+            assert!(w[1].bytes_done >= w[0].bytes_done);
+            assert_eq!(w[1].chunks, w[0].chunks);
+        }
     }
 
     #[tokio::test]

@@ -9,6 +9,19 @@ import type { LabEntry, LabStatus, Vm, DaemonEvent } from "./api";
 
 export type ViewKind = "lab" | "network" | "vm" | "logs" | "config";
 
+// A template download in progress, driven by the template.pull.* events the
+// supervisor streams while bringing a lab up (issue #1). Keyed by `lab/vm`.
+export interface Pull {
+  lab: string;
+  vm: string;
+  reference: string;
+  status: "checking" | "pulling" | "error";
+  percent: number;
+  bytesDone: number;
+  bytesTotal: number;
+  error?: string;
+}
+
 interface State {
   ready: boolean; // initial auth probe done
   authRequired: boolean;
@@ -20,6 +33,7 @@ interface State {
   view: { kind: ViewKind; vm: string | null };
   connected: boolean;
   error: string | null;
+  pulls: Record<string, Pull>;
 }
 
 const [state, setState] = createStore<State>({
@@ -33,6 +47,7 @@ const [state, setState] = createStore<State>({
   view: { kind: "lab", vm: null },
   connected: false,
   error: null,
+  pulls: {},
 });
 
 export { state };
@@ -80,7 +95,7 @@ export async function doLogout() {
   }
   api.clearToken();
   eventSocket?.close();
-  setState({ loggedIn: false, labs: [], status: null, currentLab: null });
+  setState({ loggedIn: false, labs: [], status: null, currentLab: null, pulls: {} });
 }
 
 async function afterLogin() {
@@ -244,6 +259,14 @@ function connectEvents() {
 }
 
 function handleEvent(ev: DaemonEvent) {
+  // Template pulls (issue #1): track download progress separately and DON'T
+  // schedule a status refresh on every chunk — the status call blocks behind
+  // the pull, so one queued refresh per tick would pile up. Refresh only when
+  // a pull settles, by which point the daemon is (about to be) up.
+  if (ev.event.startsWith("template.pull.")) {
+    handlePullEvent(ev);
+    return;
+  }
   // Host-scoped registry changes refresh the lab list; lab-scoped VM/state
   // events refresh the current lab's status.
   if (ev.event.startsWith("lab.")) {
@@ -252,6 +275,61 @@ function handleEvent(ev: DaemonEvent) {
   if (!ev.lab || ev.lab === state.currentLab) {
     scheduleRefresh();
   }
+}
+
+function handlePullEvent(ev: DaemonEvent) {
+  const vm = ev.data?.vm as string | undefined;
+  if (!ev.lab || !vm) return;
+  const key = `${ev.lab}/${vm}`;
+  switch (ev.event) {
+    case "template.pull.start":
+      setState("pulls", key, {
+        lab: ev.lab,
+        vm,
+        reference: ev.data.reference ?? "",
+        status: "checking",
+        percent: 0,
+        bytesDone: 0,
+        bytesTotal: 0,
+      });
+      break;
+    case "template.pull.progress":
+      setState("pulls", key, {
+        lab: ev.lab,
+        vm,
+        reference: ev.data.reference ?? state.pulls[key]?.reference ?? "",
+        status: "pulling",
+        percent: ev.data.percent ?? 0,
+        bytesDone: ev.data.bytes_done ?? 0,
+        bytesTotal: ev.data.bytes_total ?? 0,
+      });
+      break;
+    case "template.pull.done":
+      clearPull(key);
+      scheduleRefresh();
+      break;
+    case "template.pull.error":
+      setState("pulls", key, (p) =>
+        p ? { ...p, status: "error", error: String(ev.data.error ?? "pull failed") } : p,
+      );
+      // Leave the error visible briefly, then drop it.
+      setTimeout(() => clearPull(key), 6000);
+      scheduleRefresh();
+      break;
+  }
+}
+
+function clearPull(key: string) {
+  setState("pulls", key, undefined as unknown as Pull);
+}
+
+/** Active template pulls for the current lab, newest-stable order by vm name. */
+export function currentPulls(): Pull[] {
+  const lab = state.currentLab;
+  if (!lab) return [];
+  return Object.values(state.pulls)
+    .filter((p): p is Pull => !!p && p.lab === lab)
+    .sort((a, b) => a.vm.localeCompare(b.vm));
 }
 
 // --- derived helpers (shared by views) ------------------------------------
@@ -290,4 +368,11 @@ export function fmtMem(bytes: number | null): string {
   if (!bytes) return "—";
   const mb = bytes / (1024 * 1024);
   return mb >= 1024 ? `${Math.round(mb / 102.4) / 10} GB` : `${Math.round(mb)} MB`;
+}
+
+/** Compact byte size for download progress (e.g. "734 MB", "1.4 GB"). */
+export function fmtBytes(bytes: number): string {
+  if (bytes <= 0) return "0 MB";
+  const mb = bytes / (1024 * 1024);
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
 }

@@ -34,22 +34,35 @@ pub async fn events(
             });
         }
 
-        // Each lab daemon.
-        for lab in state.lab_names().await {
-            if let Ok(client) = state.lab_client_pub(&lab).await
-                && let Ok(mut events) = client.subscribe().await
-            {
-                let tx = tx.clone();
-                actix_web::rt::spawn(async move {
-                    while let Some(ev) = events.recv().await {
-                        if let Ok(s) = serde_json::to_string(&ev)
-                            && tx.send(s).await.is_err()
-                        {
-                            break;
+        // Each lab daemon that is already up. This is best-effort and must
+        // never block the forward loop below: subscribing through `ensure`
+        // would stall here for the whole of a template pull (issue #1), during
+        // which the supervisor stream — already wired above — is what carries
+        // the pull-progress events. Labs that come up later are picked up via
+        // the supervisor's aggregate forwarding.
+        {
+            let state = state.clone();
+            let tx = tx.clone();
+            actix_web::rt::spawn(async move {
+                for lab in state.lab_names().await {
+                    let Some(client) = vmlab::cli::daemon::try_lab_daemon(&lab).await else {
+                        continue;
+                    };
+                    let Ok(mut events) = client.subscribe().await else {
+                        continue;
+                    };
+                    let tx = tx.clone();
+                    actix_web::rt::spawn(async move {
+                        while let Some(ev) = events.recv().await {
+                            if let Ok(s) = serde_json::to_string(&ev)
+                                && tx.send(s).await.is_err()
+                            {
+                                break;
+                            }
                         }
-                    }
-                });
-            }
+                    });
+                }
+            });
         }
         drop(tx);
 

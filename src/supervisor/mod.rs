@@ -22,6 +22,10 @@ pub struct Supervisor {
     registry: Mutex<Registry>,
     server_events: tokio::sync::OnceCell<tokio::sync::broadcast::Sender<Event>>,
     globals: Arc<GlobalSegments>,
+    /// Per-lab locks serialising `ensure_lab`: without this, concurrent
+    /// `lab.ensure` calls (a status poll plus an `up`, say) would each spawn a
+    /// daemon and pre-pull the same templates in parallel.
+    ensure_locks: Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 /// Entry point for `vmlab __supervisord`.
@@ -40,6 +44,7 @@ async fn run_async() -> Result<()> {
         registry: Mutex::new(Registry::load()),
         server_events: tokio::sync::OnceCell::new(),
         globals: GlobalSegments::new(host_cfg.dns_suffix.clone(), host_cfg.psk.clone()),
+        ensure_locks: Mutex::new(std::collections::HashMap::new()),
     });
 
     let sock = crate::paths::supervisor_socket();
@@ -120,9 +125,23 @@ impl Supervisor {
         tracing::warn!("lab daemon for {lab} is gone; marked failed");
     }
 
+    /// The per-lab `ensure` lock, created on first use.
+    async fn ensure_lock(&self, lab: &str) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self.ensure_locks.lock().await;
+        locks
+            .entry(lab.to_string())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    }
+
     /// Spawn the lab daemon for `name` if it isn't running; wait until its
     /// control socket answers. Returns the socket path.
     async fn ensure_lab(self: &Arc<Self>, name: &str, root: PathBuf) -> Result<PathBuf, String> {
+        // Serialise per lab: a status poll and an `up` arriving together must
+        // not both spawn the daemon and pre-pull templates in parallel.
+        let lock = self.ensure_lock(name).await;
+        let _guard = lock.lock().await;
+
         let sock = crate::paths::lab_socket(name);
         {
             let reg = self.registry.lock().await;
@@ -134,6 +153,12 @@ impl Supervisor {
                 return Ok(sock);
             }
         }
+
+        // Pre-pull any registry templates the lab needs before the daemon
+        // boots, streaming download progress to the UI's event feed (issue
+        // #1). The daemon's own build re-resolves and pulls as a fallback, so
+        // a failure here only costs the progress display, never the `up`.
+        self.prepull_templates(name, &root).await;
 
         crate::paths::ensure_dir(sock.parent().expect("lab socket has parent"))
             .map_err(|e| e.to_string())?;
@@ -221,6 +246,76 @@ impl Supervisor {
                 return Err(format!("lab daemon for {name} did not come up"));
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    }
+
+    /// Resolve and download every registry-backed template the lab references
+    /// that isn't already cached, emitting `template.pull.{start,progress,done,
+    /// error}` events as it goes so the web UI can show a download bar instead
+    /// of an indefinite spinner (issue #1). Best-effort: config errors and pull
+    /// failures are left for the lab daemon's build to surface properly.
+    async fn prepull_templates(self: &Arc<Self>, lab: &str, root: &std::path::Path) {
+        let config = match crate::config::load_lab_root(root) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let store = crate::template::TemplateStore::new(crate::paths::template_store_dir());
+        for vm in &config.lab.vms {
+            let crate::config::model::TemplateRef::Registry { reference } = &vm.template else {
+                continue;
+            };
+            let Some(arch) = vm.arch.clone() else {
+                continue;
+            };
+            let vm_name = vm.name.clone();
+            let reference = reference.clone();
+            self.emit(Event::new(
+                "template.pull.start",
+                lab,
+                json!({"vm": vm_name, "reference": reference, "arch": arch}),
+            ));
+
+            let sup = self.clone();
+            let lab_s = lab.to_string();
+            let vm_s = vm_name.clone();
+            let ref_s = reference.clone();
+            let mut progress = move |p: crate::oci::PullProgress| {
+                let percent = p
+                    .bytes_done
+                    .saturating_mul(100)
+                    .checked_div(p.bytes_total)
+                    .unwrap_or(0) as u32;
+                sup.emit(Event::new(
+                    "template.pull.progress",
+                    lab_s.clone(),
+                    json!({
+                        "vm": vm_s,
+                        "reference": ref_s,
+                        "chunk": p.chunk,
+                        "chunks": p.chunks,
+                        "bytes_done": p.bytes_done,
+                        "bytes_total": p.bytes_total,
+                        "percent": percent,
+                    }),
+                ));
+            };
+            let result =
+                crate::oci::ensure_registry_template(&reference, &arch, &store, &mut progress)
+                    .await;
+            drop(progress);
+
+            match result {
+                Ok(_) => self.emit(Event::new(
+                    "template.pull.done",
+                    lab,
+                    json!({"vm": vm_name, "reference": reference}),
+                )),
+                Err(e) => self.emit(Event::new(
+                    "template.pull.error",
+                    lab,
+                    json!({"vm": vm_name, "reference": reference, "error": format!("{e:#}")}),
+                )),
+            }
         }
     }
 
