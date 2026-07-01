@@ -828,12 +828,14 @@ mod example_tests {
     use super::check_script_source;
 
     /// Every shipped example script (provision + handler, all labs and
-    /// templates) must type-check against the host module (keeps docs
-    /// honest).
+    /// templates) plus the Docker sample lab's provision must type-check
+    /// against the host module (keeps docs honest).
     #[test]
     fn shipped_examples_compile() {
-        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/examples");
-        let mut stack = vec![std::path::PathBuf::from(root)];
+        let mut stack = vec![
+            std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/examples")),
+            std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/docker")),
+        ];
         let mut checked = 0usize;
         while let Some(dir) = stack.pop() {
             for entry in std::fs::read_dir(&dir).unwrap() {

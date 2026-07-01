@@ -30,6 +30,11 @@ services:
     volumes:
       # Your lab directory — edit ./docker/lab/vmlab.wcl on the host.
       - ./docker/lab:/lab
+      # Files you want visible inside the VMs. Drop them in ./docker/share on
+      # the host; reference them from vmlab.wcl with host = "/share" (see the
+      # sample). Unlike the working-data volume below this is meant to live on
+      # the bind mount — it's read-mostly host↔guest exchange, not churning I/O.
+      - ./docker/share:/share
       # Persistent template store (templates are pulled on first `up`).
       - vmlab-templates:/root/.local/share/vmlab/templates
       # Lab working data (disk clones, built media, lab state). Kept on a

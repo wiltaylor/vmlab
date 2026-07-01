@@ -72,7 +72,12 @@ COPY --from=builder /build/vmlab/target/release/vmlab-web /usr/local/bin/vmlab-w
 #   /root/.local/share/vmlab/templates  — the template store
 #   /var/lib/vmlab/work                  — lab working data (disk clones, media)
 #   /lab                                — the lab directory (holds vmlab.wcl)
-# Everything else is container-ephemeral by design.
+#   /share                              — host files shared into guest VMs
+#                                         (bind-mount from the host; referenced
+#                                          as host = "/share" in vmlab.wcl)
+# Everything else is container-ephemeral by design. /share is intentionally not
+# a declared VOLUME: it is only useful bind-mounted from the host, and a bare
+# `docker run` should not mint a stray anonymous volume for it.
 #
 # The lab's working data (linked disk clones, built ISOs, TPM + lab state) is
 # normally written to `<lab>/.vmlab`. With /lab bind-mounted from the host that

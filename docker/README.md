@@ -31,13 +31,54 @@ volume.
 KVM acceleration uses the host's `/dev/kvm` (mapped in `compose.yaml`); remove
 that device mapping to fall back to slower TCG emulation.
 
+## Sharing files into your VMs
+
+Drop files in `docker/share/` on the host — it's bind-mounted to `/share` in
+the container (`compose.yaml`) — and share that path into a VM from your
+`vmlab.wcl`:
+
+```wcl
+vm "alpine" {
+  # ...
+  share { host = "/share" guest = "/mnt/share" }   // Linux guest
+}
+
+vm "winsrv" {
+  # ...
+  share { host = "/share" guest = "S:" }           // Windows guest (drive)
+}
+```
+
+vmlab serves the directory over SMB and auto-mounts it in the guest once the
+guest agent responds. The `host` path is absolute, so it's used as-is; a
+relative `host = "./sub"` would instead resolve against the lab directory
+(`/lab`).
+
+**Guest prerequisites (Linux only).** Windows mounts the share natively. A
+Linux guest needs two things the mount step does *not* provide for you:
+
+- `cifs-utils` installed (the `mount.cifs` helper — kernel CIFS alone isn't
+  enough), and
+- the mount point (e.g. `/mnt/share`) to already exist.
+
+The shipped sample lab handles both in `docker/lab/provision.ws`
+(`apk add --no-cache cifs-utils` + `mkdir -p /mnt/share`); copy that pattern
+for your own Linux guests, or bake the prerequisites into the template.
+
+**Write-back ownership caveat.** The in-container `smbd` runs as `root`, so
+files a guest *writes* into the share land on the host owned by `root:root`
+(you may need `sudo` to remove them). If you need host-user ownership, run the
+container as your uid (add `user: "${UID}:${GID}"` to the compose service, with
+matching host-file permissions) or append `uid=`/`gid=` to the guest's cifs
+mount options via a provision.
+
 ## Plain `docker run`
 
 ```sh
-# Web UI
+# Web UI (add -v "$PWD/share":/share to share host files into the VMs)
 docker run --rm -p 7878:7878 --device /dev/kvm \
   -e VMLAB_WEB_USER=admin -e VMLAB_WEB_PASSWORD=secret \
-  -v "$PWD":/lab vmlab:latest
+  -v "$PWD":/lab -v "$PWD/share":/share vmlab:latest
 
 # CLI (override the default command)
 docker run --rm --device /dev/kvm -v "$PWD":/lab vmlab:latest vmlab up

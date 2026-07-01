@@ -15,6 +15,10 @@ lab "demo" {
     arch     = "x86_64"   // OCI registry refs are multi-arch — pick one
     memory   = 1GiB
     nic { segment = "lan" }
+    // Files in ./docker/share on the host (bind-mounted to /share) appear
+    // here at /mnt/share. provision.ws installs cifs-utils and creates the
+    // mount point so the daemon's SMB auto-mount lands (see ../README.md).
+    share { host = "/share" guest = "/mnt/share" }
   }
 
   vm "alpine2" {
@@ -23,4 +27,7 @@ lab "demo" {
     memory   = 1GiB
     nic { segment = "lan" }
   }
+
+  // Prepares the alpine guest for the /share mount (cifs-utils + mkdir).
+  provision "provision.ws" { vms = ["alpine"] }
 }
