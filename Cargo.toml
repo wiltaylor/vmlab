@@ -69,6 +69,8 @@ async-trait = "0.1.89"
 tempfile = "3"
 assert_cmd = "2"
 predicates = "3"
+# test-util enables tokio::time::{pause, advance} for clock-driven expiry tests.
+tokio = { version = "1", features = ["full", "test-util"] }
 
 [lints.rust]
 unsafe_code = "deny"

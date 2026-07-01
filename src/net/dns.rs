@@ -938,4 +938,66 @@ mod tests {
                 .is_none()
         );
     }
+
+    /// Hostile qnames must never panic: label lengths running past the
+    /// packet, compression pointers, a maximal-size name (whose echoed
+    /// response would overflow the reply builders), and every single-byte
+    /// corruption of a valid query.
+    #[test]
+    fn hostile_qnames_never_panic() {
+        let server = DnsServer::new(DnsZone::new("vmlab.internal"));
+
+        let raw_frame = |msg: &[u8]| {
+            let udp = udp_build(CLIENT_IP, SERVER_IP, CLIENT_PORT, DNS_PORT, msg).unwrap();
+            let ipp = ipv4_build(CLIENT_IP, SERVER_IP, IPPROTO_UDP, 64, &udp, 5).unwrap();
+            eth_build(SERVER_MAC, CLIENT_MAC, ETHERTYPE_IPV4, &ipp)
+        };
+        let header = |qd: u16| {
+            let mut m = Vec::new();
+            m.extend_from_slice(&7u16.to_be_bytes());
+            m.extend_from_slice(&[0x01, 0x00]);
+            m.extend_from_slice(&qd.to_be_bytes());
+            m.extend_from_slice(&[0, 0, 0, 0, 0, 0]);
+            m
+        };
+
+        // Label length claims 63 bytes but only 2 are present.
+        let mut m = header(1);
+        m.extend_from_slice(&[63, b'a', b'b']);
+        assert!(matches!(server.handle(&raw_frame(&m)), DnsAction::Ignore));
+
+        // Compression pointer in the question (unsupported → ignored).
+        let mut m = header(1);
+        m.extend_from_slice(&[0xC0, 0x0C, 0, QTYPE_A as u8, 0, QCLASS_IN as u8]);
+        assert!(matches!(server.handle(&raw_frame(&m)), DnsAction::Ignore));
+
+        // A maximal name: enough 63-byte labels to approach the UDP payload
+        // limit. The echoed response would not fit an IPv4 packet; the server
+        // must drop it (or answer with a frame that parses), never panic.
+        let mut m = header(1);
+        let big = 64_000 / 64;
+        for _ in 0..big {
+            m.push(63);
+            m.extend_from_slice(&[b'x'; 63]);
+        }
+        m.push(0);
+        m.extend_from_slice(&QTYPE_A.to_be_bytes());
+        m.extend_from_slice(&QCLASS_IN.to_be_bytes());
+        match server.handle(&raw_frame(&m)) {
+            DnsAction::Reply(f) => {
+                assert!(EthView::parse(&f).is_some());
+            }
+            DnsAction::ForwardUpstream { .. } | DnsAction::Ignore => {}
+        }
+
+        // Single-byte corruption sweep over a valid query.
+        let good = query_frame(9, "corrupt.example.com", QTYPE_A);
+        for i in 0..good.len() {
+            let mut f = good.clone();
+            f[i] ^= 0xFF;
+            if let DnsAction::Reply(reply) = server.handle(&f) {
+                assert!(EthView::parse(&reply).is_some());
+            }
+        }
+    }
 }

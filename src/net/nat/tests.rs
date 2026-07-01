@@ -29,7 +29,11 @@ const GW_MAC: MacAddr = MacAddr([0x02, 0xAA, 0, 0, 0, 0x01]);
 const GUEST_IP: Ipv4Addr = Ipv4Addr::new(10, 213, 0, 10);
 const GUEST_MAC: MacAddr = MacAddr([0x02, 0xBB, 0, 0, 0, 0x10]);
 
-const WAIT: Duration = Duration::from_secs(3);
+/// Generous receive timeout: passing tests return as soon as the frame
+/// arrives, so this only bounds genuinely-failing runs — and the tests that
+/// do real socket work (e.g. `vtcp_rst_on_connect_refused`) have flaked on
+/// a shorter value under heavy parallel build load.
+const WAIT: Duration = Duration::from_secs(15);
 
 fn engine() -> (Arc<NatEngine>, mpsc::Receiver<Bytes>) {
     let (tx, rx) = mpsc::channel(256);
@@ -669,4 +673,52 @@ async fn icmp_echo_to_gateway_is_ignored() {
         "no frame emitted"
     );
     assert_eq!(pinger.calls.load(Ordering::SeqCst), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Flow-table hygiene under churn
+// ---------------------------------------------------------------------------
+
+/// Many distinct guest flows fill the UDP table once each (repeat traffic
+/// reuses the entry), and idle expiry drains it back to empty — the table
+/// must not grow without bound under connection churn.
+#[tokio::test]
+async fn udp_flow_table_reuses_entries_and_expires_idle_ones() {
+    use crate::sync::LockRecover;
+
+    let (engine, _rx) = engine();
+    // A local sink so every flow's connect/send succeeds.
+    let sink = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let dst = (
+        Ipv4Addr::new(127, 0, 0, 1),
+        sink.local_addr().unwrap().port(),
+    );
+
+    const FLOWS: u16 = 32;
+    for i in 0..FLOWS {
+        guest_udp(&engine, 20_000 + i, dst, b"hello").await;
+    }
+    assert_eq!(engine.udp_flows.lock_recover().len(), usize::from(FLOWS));
+
+    // Repeat traffic on existing flows must reuse, not duplicate.
+    for i in 0..FLOWS {
+        guest_udp(&engine, 20_000 + i, dst, b"again").await;
+    }
+    assert_eq!(engine.udp_flows.lock_recover().len(), usize::from(FLOWS));
+
+    // Fast-forward past the idle window (flows track tokio time): every
+    // reader task's timeout fires, sees the idle flow, and removes it.
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(61)).await;
+    for _ in 0..200 {
+        tokio::task::yield_now().await;
+        if engine.udp_flows.lock_recover().is_empty() {
+            break;
+        }
+    }
+    assert_eq!(
+        engine.udp_flows.lock_recover().len(),
+        0,
+        "idle flows drained"
+    );
 }

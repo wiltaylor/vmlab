@@ -364,9 +364,15 @@ impl RuleSet {
     }
 
     fn expire_conns(&self) {
+        self.expire_conns_older_than(CONN_IDLE);
+    }
+
+    /// Expiry with an explicit idle threshold, so tests can drain the table
+    /// without waiting out the real `CONN_IDLE`.
+    fn expire_conns_older_than(&self, idle: Duration) {
         let mut conns = self.conns.lock_recover();
         if !conns.is_empty() {
-            conns.retain(|_, v| v.last.elapsed() < CONN_IDLE);
+            conns.retain(|_, v| v.last.elapsed() < idle);
         }
     }
 
@@ -1062,5 +1068,30 @@ mod tests {
         assert_eq!(i.icmp_type(), ICMP_DEST_UNREACHABLE);
         assert_eq!(i.code(), 1, "host unreachable");
         assert_checksums_ok(&r);
+    }
+
+    /// The translation table drains under connection churn instead of
+    /// growing forever, and expiry does not disturb fresh flows.
+    #[test]
+    fn conn_table_drains_under_churn() {
+        let mut rs = RuleSet::new();
+        rs.add_redirect(redirect(DST_A, None, TARGET, None, None));
+
+        for sport in 0..200u16 {
+            let p = tcp_pkt(GUEST, DST_A, 10_000 + sport, 80, frame::TCP_SYN);
+            assert!(matches!(rs.eval(&p), Verdict::Rewrite(_)));
+        }
+        assert_eq!(rs.conn_count(), 200);
+
+        // Everything idles out.
+        rs.expire_conns_older_than(Duration::ZERO);
+        assert_eq!(rs.conn_count(), 0);
+
+        // A fresh flow re-tracks and its return path still translates.
+        let p = tcp_pkt(GUEST, DST_A, 6000, 80, frame::TCP_SYN);
+        assert!(matches!(rs.eval(&p), Verdict::Rewrite(_)));
+        assert_eq!(rs.conn_count(), 1);
+        let reply = tcp_pkt(TARGET, GUEST, 80, 6000, frame::TCP_ACK);
+        assert!(matches!(rs.eval_return(&reply), Verdict::Rewrite(_)));
     }
 }

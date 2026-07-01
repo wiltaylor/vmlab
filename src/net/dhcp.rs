@@ -864,4 +864,61 @@ mod tests {
             let _ = s.handle(&f[..n]);
         }
     }
+
+    /// Hostile option TLVs must never panic the parser: lengths running past
+    /// the buffer, zero-length options, a missing END, and every possible
+    /// single-byte corruption of a valid DISCOVER.
+    #[test]
+    fn hostile_options_never_panic() {
+        let mut s = DhcpServer::new(config());
+
+        // An option whose declared length runs past the end of the message.
+        let mut b = vec![0u8; 240];
+        b[0] = BOOTREQUEST;
+        b[1] = 1;
+        b[2] = 6;
+        b[4..8].copy_from_slice(&XID.to_be_bytes());
+        b[28..34].copy_from_slice(&mac(3).0);
+        b[236..240].copy_from_slice(&MAGIC_COOKIE);
+        b.extend_from_slice(&[OPT_MSG_TYPE, 200, DHCP_DISCOVER]); // len 200, 1 byte present
+        let udp = udp_build(Ipv4Addr::UNSPECIFIED, Ipv4Addr::BROADCAST, 68, 67, &b).unwrap();
+        let ip = ipv4_build(
+            Ipv4Addr::UNSPECIFIED,
+            Ipv4Addr::BROADCAST,
+            IPPROTO_UDP,
+            64,
+            &udp,
+            1,
+        )
+        .unwrap();
+        let f = eth_build(MAC_BROADCAST, mac(3), ETHERTYPE_IPV4, &ip);
+        let _ = s.handle(&f);
+
+        // Zero-length options and no END terminator.
+        let mut b2 = b[..240].to_vec();
+        b2.extend_from_slice(&[OPT_MSG_TYPE, 0, 42, 0, 42, 0]);
+        let udp = udp_build(Ipv4Addr::UNSPECIFIED, Ipv4Addr::BROADCAST, 68, 67, &b2).unwrap();
+        let ip = ipv4_build(
+            Ipv4Addr::UNSPECIFIED,
+            Ipv4Addr::BROADCAST,
+            IPPROTO_UDP,
+            64,
+            &udp,
+            1,
+        )
+        .unwrap();
+        let f = eth_build(MAC_BROADCAST, mac(3), ETHERTYPE_IPV4, &ip);
+        let _ = s.handle(&f);
+
+        // Single-byte corruption sweep over a valid DISCOVER: any reply that
+        // does come back must still be a parseable frame.
+        let good = discover(mac(4));
+        for i in 0..good.len() {
+            let mut f = good.clone();
+            f[i] ^= 0xFF;
+            if let Some(reply) = s.handle(&f) {
+                assert!(EthView::parse(&reply).is_some());
+            }
+        }
+    }
 }
