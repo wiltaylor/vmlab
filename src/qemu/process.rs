@@ -116,6 +116,15 @@ impl Proc {
     }
 }
 
+/// Is `bin` on PATH? Used by the lab daemon's pre-`up` binary check so a
+/// missing package is one clear error instead of a spawn failure mid-boot.
+pub fn binary_on_path(bin: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path).any(|d| d.join(bin).is_file())
+}
+
 /// Spawn swtpm for a VM (PRD §5.3): TPM 2.0 emulator on a unix control
 /// socket, state under `state_dir`.
 pub async fn spawn_swtpm(
@@ -216,6 +225,12 @@ mod tests {
             .await
             .unwrap();
         assert!(status.contains("signal"), "{status}");
+    }
+
+    #[test]
+    fn binary_on_path_probes_path() {
+        assert!(binary_on_path("sh"));
+        assert!(!binary_on_path("definitely-not-a-real-binary-1a2b3c"));
     }
 
     #[test]

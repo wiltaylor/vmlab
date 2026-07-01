@@ -368,6 +368,36 @@ impl LabRuntime {
             .ok_or_else(|| anyhow!("no vm \"{name}\" in lab \"{}\"", self.name))
     }
 
+    /// Verify the external binaries starting `targets` will need are on PATH
+    /// (the per-arch QEMU emulator, `qemu-img` for clones, `swtpm` when a VM
+    /// wants a TPM), so a missing package surfaces as one clear error before
+    /// any clone or boot work begins instead of a spawn failure mid-`up`.
+    pub fn preflight_binaries(&self, targets: &[String]) -> Result<()> {
+        let mut needed: Vec<String> = vec!["qemu-img".to_string()];
+        for name in targets {
+            let vm = self.vm(name)?;
+            let emu = crate::qemu::emulator_binary(&vm.resolved.arch);
+            if !needed.contains(&emu) {
+                needed.push(emu);
+            }
+            if vm.resolved.tpm && !needed.iter().any(|b| b == "swtpm") {
+                needed.push("swtpm".to_string());
+            }
+        }
+        let missing: Vec<String> = needed
+            .into_iter()
+            .filter(|b| !crate::qemu::process::binary_on_path(b))
+            .collect();
+        if !missing.is_empty() {
+            bail!(
+                "missing required binaries on PATH: {} — install the QEMU/swtpm \
+                 packages (PRD §14 lists the runtime dependencies)",
+                missing.join(", ")
+            );
+        }
+        Ok(())
+    }
+
     /// Start one VM: wire its NIC sockets into the segment switches, then
     /// boot it with event-emitting callbacks.
     pub async fn start_vm(self: &Arc<Self>, name: &str) -> Result<()> {
@@ -445,6 +475,8 @@ impl LabRuntime {
                 .filter(|n| wanted.contains(n))
                 .collect()
         };
+
+        self.preflight_binaries(&targets)?;
 
         // Start the SMB server before guests boot so shares are reachable
         // during provisioning (PRD §7.5).

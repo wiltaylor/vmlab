@@ -212,7 +212,10 @@ impl Handler for LabdHandler {
                 Ok(json!(true))
             }
             "vm.start" => {
-                lab.start_vm(&vm_arg(&args)?).await.map_err(err)?;
+                let vm = vm_arg(&args)?;
+                lab.preflight_binaries(std::slice::from_ref(&vm))
+                    .map_err(err)?;
+                lab.start_vm(&vm).await.map_err(err)?;
                 Ok(json!(true))
             }
             "vm.stop" => {
