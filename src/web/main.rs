@@ -50,6 +50,10 @@ struct Args {
     /// Bring the working-directory lab up on startup (or VMLAB_WEB_UP)
     #[arg(long)]
     up: bool,
+    /// Behind a reverse proxy: attribute clients by the proxy-appended
+    /// X-Forwarded-For entry for login rate limiting (or VMLAB_WEB_TRUST_PROXY)
+    #[arg(long)]
+    trust_proxy: bool,
 }
 
 /// A CLI flag value, falling back to an environment variable. Empty values
@@ -144,7 +148,8 @@ async fn main() -> ExitCode {
         );
     }
 
-    let data = web::Data::new(AppState::new(auth, default_lab));
+    let trust_proxy = args.trust_proxy || env_flag("VMLAB_WEB_TRUST_PROXY");
+    let data = web::Data::new(AppState::new(auth, default_lab, trust_proxy));
     let (bind, port) = (args.bind, args.port);
 
     // Optionally bring the working-directory lab up so it is already running

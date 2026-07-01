@@ -47,6 +47,10 @@ pub struct AuthConfig {
 
 pub struct AppState {
     pub auth: AuthConfig,
+    /// Trust the nearest reverse proxy's `X-Forwarded-For` when attributing
+    /// client addresses (login backoff). Off by default: with no proxy in
+    /// front, the header is attacker-controlled.
+    pub trust_proxy: bool,
     /// token → last-seen instant.
     sessions: Mutex<HashMap<String, Instant>>,
     session_ttl: Duration,
@@ -62,7 +66,11 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(auth: AuthConfig, default_lab: Option<(String, PathBuf)>) -> Self {
+    pub fn new(
+        auth: AuthConfig,
+        default_lab: Option<(String, PathBuf)>,
+        trust_proxy: bool,
+    ) -> Self {
         let mut roots = HashMap::new();
         if let Some((name, root)) = &default_lab {
             roots.insert(name.clone(), root.clone());
@@ -75,6 +83,7 @@ impl AppState {
             .unwrap_or(DEFAULT_SESSION_TTL);
         Self {
             auth,
+            trust_proxy,
             sessions: Mutex::new(HashMap::new()),
             session_ttl,
             login_failures: Mutex::new(HashMap::new()),
@@ -289,6 +298,7 @@ mod tests {
                 password_hash: String::new(),
             },
             None,
+            false,
         );
         let addr: IpAddr = "192.0.2.7".parse().unwrap();
         assert!(!state.login_throttled(addr).await);

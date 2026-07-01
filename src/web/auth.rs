@@ -45,8 +45,25 @@ fn new_token() -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
+/// The address login backoff should attribute a request to: the TCP peer,
+/// or — only when the operator opted in with `--trust-proxy` — the *last*
+/// entry of `X-Forwarded-For` (the one appended by the nearest proxy; earlier
+/// entries are whatever the client sent).
+fn client_ip(req: &HttpRequest, trust_proxy: bool) -> Option<std::net::IpAddr> {
+    if trust_proxy
+        && let Some(xff) = req.headers().get("x-forwarded-for")
+        && let Ok(s) = xff.to_str()
+        && let Some(ip) = s.rsplit(',').next().and_then(|e| e.trim().parse().ok())
+    {
+        return Some(ip);
+    }
+    req.peer_addr().map(|a| a.ip())
+}
+
 /// Pull the bearer token from the `Authorization` header or a `?token=` query
-/// param (WebSocket upgrades and `<img>` loads can't set headers).
+/// param (WebSocket upgrades and `<img>` loads can't set headers). Note the
+/// query form means tokens can show up in reverse-proxy access logs; scrub
+/// query strings there if that matters in your deployment.
 pub fn request_token(req: &HttpRequest) -> Option<String> {
     if let Some(h) = req.headers().get("authorization")
         && let Ok(s) = h.to_str()
@@ -120,7 +137,7 @@ pub async fn login(
         return HttpResponse::Ok().json(json!({"token": token}));
     }
     // Per-address backoff: argon2 alone still allows an online brute force.
-    let addr = req.peer_addr().map(|a| a.ip());
+    let addr = client_ip(&req, state.trust_proxy);
     if let Some(addr) = addr
         && state.login_throttled(addr).await
     {
@@ -148,4 +165,117 @@ pub async fn logout(state: web::Data<AppState>, req: HttpRequest) -> HttpRespons
         state.drop_session(&t).await;
     }
     HttpResponse::Ok().json(json!({"ok": true}))
+}
+
+#[cfg(test)]
+mod tests {
+    use actix_web::middleware::from_fn;
+    use actix_web::{App, HttpResponse, test, web};
+
+    use super::super::state::{AppState, AuthConfig};
+    use super::*;
+
+    async fn protected() -> HttpResponse {
+        HttpResponse::Ok().json(json!({"secret": true}))
+    }
+
+    /// A test app with the real gate, probe, and login handlers plus a
+    /// protected API route and a protected VNC-style route.
+    macro_rules! gated_app {
+        ($state:expr) => {
+            test::init_service(
+                App::new()
+                    .app_data($state.clone())
+                    .wrap(from_fn(gate))
+                    .route("/api/auth", web::get().to(probe))
+                    .route("/api/login", web::post().to(login))
+                    .route("/api/labs", web::get().to(protected))
+                    .route("/vnc/lab/vm", web::get().to(protected)),
+            )
+            .await
+        };
+    }
+
+    fn auth_state() -> web::Data<AppState> {
+        web::Data::new(AppState::new(
+            AuthConfig {
+                enabled: true,
+                user: "admin".into(),
+                password_hash: hash_password("hunter2").unwrap(),
+            },
+            None,
+            false,
+        ))
+    }
+
+    #[actix_web::test]
+    async fn gate_blocks_protected_routes_without_a_token() {
+        let app = gated_app!(auth_state());
+        for path in ["/api/labs", "/vnc/lab/vm"] {
+            let resp =
+                test::call_service(&app, test::TestRequest::get().uri(path).to_request()).await;
+            assert_eq!(resp.status(), 401, "{path}");
+        }
+        // Garbage bearer token is rejected too.
+        let req = test::TestRequest::get()
+            .uri("/api/labs")
+            .insert_header(("authorization", "Bearer not-a-real-token"))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status(), 401);
+    }
+
+    #[actix_web::test]
+    async fn gate_exempts_probe_and_login_only() {
+        let app = gated_app!(auth_state());
+        let resp =
+            test::call_service(&app, test::TestRequest::get().uri("/api/auth").to_request()).await;
+        assert_eq!(resp.status(), 200);
+        // Login is reachable without a token (that's the point) — bad creds
+        // get 401 from the handler, not from the gate.
+        let req = test::TestRequest::post()
+            .uri("/api/login")
+            .set_json(json!({"username": "admin", "password": "wrong"}))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status(), 401);
+    }
+
+    #[actix_web::test]
+    async fn login_token_unlocks_header_and_query_access() {
+        let app = gated_app!(auth_state());
+        let req = test::TestRequest::post()
+            .uri("/api/login")
+            .set_json(json!({"username": "admin", "password": "hunter2"}))
+            .to_request();
+        let body: serde_json::Value = test::call_and_read_body_json(&app, req).await;
+        let token = body["token"].as_str().expect("token issued").to_string();
+
+        let req = test::TestRequest::get()
+            .uri("/api/labs")
+            .insert_header(("authorization", format!("Bearer {token}")))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status(), 200);
+
+        // WebSocket upgrades / <img> loads use the query-param form.
+        let req = test::TestRequest::get()
+            .uri(&format!("/vnc/lab/vm?token={token}"))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status(), 200);
+    }
+
+    #[actix_web::test]
+    async fn disabled_auth_is_a_passthrough() {
+        let state = web::Data::new(AppState::new(
+            AuthConfig {
+                enabled: false,
+                user: String::new(),
+                password_hash: String::new(),
+            },
+            None,
+            false,
+        ));
+        let app = gated_app!(state);
+        let resp =
+            test::call_service(&app, test::TestRequest::get().uri("/api/labs").to_request()).await;
+        assert_eq!(resp.status(), 200);
+    }
 }
