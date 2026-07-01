@@ -530,6 +530,7 @@ The viewer is chosen automatically: an explicit `viewer` in host config wins, el
 | `vmlab console <vm>` | Attach viewer |
 | `vmlab exec [--timeout s] <vm> -- cmd` | Guest-agent exec |
 | `vmlab cp <src> <vm>:<dest>` | Copy a host file/tree into a guest via the agent |
+| `vmlab osinfo <vm>` | Guest OS identification as JSON |
 | `vmlab script <script.ws>` | Ad-hoc script against the current lab |
 | `vmlab logs [lab/][vm]` | Tail/dump JSON-line logs |
 | `vmlab template build / list / rm / export / import` | Template store |
