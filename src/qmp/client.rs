@@ -1,6 +1,7 @@
 //! QMP client implementation: connection handshake, request/response
 //! correlation by id, event fan-out, and typed command wrappers.
 
+use crate::sync::LockRecover;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -42,7 +43,7 @@ impl Shared {
     /// Fail every pending request with [`QmpError::Closed`] and refuse
     /// future ones.
     fn close(&self) {
-        let drained = self.pending.lock().expect("qmp pending lock").take();
+        let drained = self.pending.lock_recover().take();
         if let Some(map) = drained {
             for (_, tx) in map {
                 let _ = tx.send(Err(QmpError::Closed));
@@ -148,7 +149,7 @@ impl QmpClient {
 
         let (tx, rx) = oneshot::channel();
         {
-            let mut guard = self.inner.shared.pending.lock().expect("qmp pending lock");
+            let mut guard = self.inner.shared.pending.lock_recover();
             match guard.as_mut() {
                 Some(map) => {
                     map.insert(id, tx);
@@ -163,14 +164,7 @@ impl QmpClient {
         };
         if let Err(e) = write_result {
             // Nobody will ever answer this id; un-register it.
-            if let Some(map) = self
-                .inner
-                .shared
-                .pending
-                .lock()
-                .expect("qmp pending lock")
-                .as_mut()
-            {
+            if let Some(map) = self.inner.shared.pending.lock_recover().as_mut() {
                 map.remove(&id);
             }
             return Err(e);
@@ -189,12 +183,7 @@ impl QmpClient {
     /// but the tests close explicitly to assert in-flight behaviour.)
     #[allow(dead_code)]
     pub async fn close(&self) {
-        let task = self
-            .inner
-            .reader_task
-            .lock()
-            .expect("qmp reader task lock")
-            .take();
+        let task = self.inner.reader_task.lock_recover().take();
         if let Some(task) = task {
             task.abort();
         }
@@ -490,8 +479,7 @@ async fn reader_loop(
         };
         let tx = shared
             .pending
-            .lock()
-            .expect("qmp pending lock")
+            .lock_recover()
             .as_mut()
             .and_then(|map| map.remove(&id));
         if let Some(tx) = tx {

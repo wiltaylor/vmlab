@@ -6,6 +6,7 @@
 //! isolation, and exposes an ingress hook seam for later L3 rule
 //! enforcement.
 
+use crate::sync::LockRecover;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -145,14 +146,14 @@ impl Switch {
     /// Install (or replace) the ingress hook. The hook runs synchronously on
     /// every ingress frame before MAC learning and forwarding.
     pub fn set_ingress_hook(&self, hook: IngressHook) {
-        *self.hook.lock().expect("hook lock poisoned") = Some(hook);
+        *self.hook.lock_recover() = Some(hook);
     }
 
     /// Diagnostics counters; consumed by the switch tests only so far.
     #[allow(dead_code)]
     pub fn stats(&self) -> SwitchStats {
         SwitchStats {
-            ports: self.inner.lock().expect("switch lock poisoned").ports.len(),
+            ports: self.inner.lock_recover().ports.len(),
             frames_forwarded: self.forwarded.load(Ordering::Relaxed),
             frames_flooded: self.flooded.load(Ordering::Relaxed),
             frames_dropped: self.dropped.load(Ordering::Relaxed),
@@ -223,7 +224,7 @@ impl Switch {
 
     /// Detach a port and purge every MAC learned on it. Idempotent.
     pub fn remove_port(&self, id: PortId) {
-        let mut inner = self.inner.lock().expect("switch lock poisoned");
+        let mut inner = self.inner.lock_recover();
         if inner.ports.remove(&id).is_some() {
             inner.macs.retain(|_, p| *p != id);
             debug!(switch = %self.name, %id, "port removed");
@@ -277,8 +278,7 @@ impl Switch {
     fn attach(&self, id: PortId, class: PortClass) -> mpsc::Receiver<Bytes> {
         let (tx, rx) = mpsc::channel(PORT_QUEUE_CAPACITY);
         self.inner
-            .lock()
-            .expect("switch lock poisoned")
+            .lock_recover()
             .ports
             .insert(id, PortEntry { class, tx });
         rx
@@ -287,7 +287,7 @@ impl Switch {
     /// Process one frame received on `port`: hook, learn, forward.
     fn ingress(&self, port: PortId, frame: Bytes) {
         let ingress_class = {
-            let inner = self.inner.lock().expect("switch lock poisoned");
+            let inner = self.inner.lock_recover();
             match inner.ports.get(&port) {
                 Some(p) => p.class,
                 None => return, // port already gone
@@ -296,7 +296,7 @@ impl Switch {
 
         // Ingress hook (rule enforcement seam).
         let action = {
-            let hook = self.hook.lock().expect("hook lock poisoned");
+            let hook = self.hook.lock_recover();
             match hook.as_ref() {
                 Some(h) => h(port, &ingress_class, &frame),
                 None => HookAction::Pass,
@@ -311,7 +311,7 @@ impl Switch {
             HookAction::Replace(f) => Some(Bytes::from(f)),
             HookAction::Inject { forward, reply } => {
                 if !reply.is_empty() {
-                    let inner = self.inner.lock().expect("switch lock poisoned");
+                    let inner = self.inner.lock_recover();
                     if let Some(p) = inner.ports.get(&port) {
                         for r in reply {
                             if p.tx.try_send(r).is_err() {
@@ -338,7 +338,7 @@ impl Switch {
         src.copy_from_slice(&frame[6..12]);
         let src = MacAddr(src);
 
-        let inner = &mut *self.inner.lock().expect("switch lock poisoned");
+        let inner = &mut *self.inner.lock_recover();
 
         // Learn the source MAC; relearning moves it (VM migrated ports).
         if !is_multicast(&src) {

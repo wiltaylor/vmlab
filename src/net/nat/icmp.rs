@@ -16,6 +16,7 @@
 //! probe/cache latency, not the real path RTT — only *reachability* is
 //! meaningful.
 
+use crate::sync::LockRecover;
 use std::collections::{HashMap, HashSet};
 use std::net::Ipv4Addr;
 use std::process::Stdio;
@@ -95,7 +96,7 @@ impl IcmpState {
     }
 
     fn cached(&self, dst: Ipv4Addr) -> Option<bool> {
-        let cache = self.cache.lock().expect("icmp cache lock");
+        let cache = self.cache.lock_recover();
         match cache.get(&dst) {
             Some((ok, at)) if at.elapsed() < CACHE_TTL => Some(*ok),
             _ => None,
@@ -104,15 +105,12 @@ impl IcmpState {
 
     /// Try to claim the probe for `dst`; `false` means one is in flight.
     fn claim(&self, dst: Ipv4Addr) -> bool {
-        self.pending.lock().expect("icmp pending lock").insert(dst)
+        self.pending.lock_recover().insert(dst)
     }
 
     fn complete(&self, dst: Ipv4Addr, ok: bool) {
-        self.cache
-            .lock()
-            .expect("icmp cache lock")
-            .insert(dst, (ok, Instant::now()));
-        self.pending.lock().expect("icmp pending lock").remove(&dst);
+        self.cache.lock_recover().insert(dst, (ok, Instant::now()));
+        self.pending.lock_recover().remove(&dst);
     }
 }
 
@@ -150,13 +148,15 @@ async fn respond(engine: &Arc<NatEngine>, guest_mac: MacAddr, pkt: &[u8], reacha
         return;
     };
     let unreachable = frame::icmp_unreachable_for(pkt, 1); // host unreachable
-    let out = frame::ipv4_build(
+    let Some(out) = frame::ipv4_build(
         engine.config().gw_ip,
         ip.src(),
         IPPROTO_ICMP,
         64,
         &unreachable,
         engine.next_ip_id(),
-    );
+    ) else {
+        return;
+    };
     engine.send_frame(guest_mac, &out).await;
 }

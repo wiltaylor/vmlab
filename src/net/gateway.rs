@@ -12,6 +12,7 @@
 //!   pluggable uplink handler — the NAT / inter-segment routing engine,
 //!   wired in later via [`GatewayHandle::set_uplink`].
 
+use crate::sync::LockRecover;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -102,7 +103,7 @@ impl GatewayHandle {
     pub fn dhcp_leases(&self) -> Vec<(MacAddr, Ipv4Addr)> {
         self.dhcp
             .as_ref()
-            .map(|d| d.lock().expect("dhcp lock poisoned").leases())
+            .map(|d| d.lock_recover().leases())
             .unwrap_or_default()
     }
 
@@ -116,16 +117,13 @@ impl GatewayHandle {
     /// closure returns the current leases, or `None` once DHCP is gone.
     pub fn leases_probe(&self) -> impl Fn() -> Option<Vec<(MacAddr, Ipv4Addr)>> + Send + 'static {
         let dhcp = self.dhcp.clone();
-        move || {
-            dhcp.as_ref()
-                .map(|d| d.lock().expect("dhcp lock poisoned").leases())
-        }
+        move || dhcp.as_ref().map(|d| d.lock_recover().leases())
     }
 
     /// Install (or replace) the uplink handler that receives off-segment
     /// frames — the NAT / inter-segment routing seam.
     pub fn set_uplink(&self, handler: UplinkFn) {
-        *self.uplink.lock().expect("uplink lock poisoned") = Some(handler);
+        *self.uplink.lock_recover() = Some(handler);
     }
 
     /// Send a frame out the gateway port into the switch (the NAT return
@@ -261,7 +259,7 @@ impl GatewayTask {
         {
             if udp.dst_port() == DHCP_SERVER_PORT {
                 if let Some(dhcp) = &self.dhcp {
-                    let reply = dhcp.lock().expect("dhcp lock poisoned").handle(frame);
+                    let reply = dhcp.lock_recover().handle(frame);
                     if let Some(reply) = reply {
                         self.send(reply);
                     }
@@ -297,7 +295,7 @@ impl GatewayTask {
         // Addressed to the gateway MAC but not its IP: a guest routing
         // off-segment traffic through us. Hand it to the uplink.
         if eth.dst_mac() == self.gw_mac {
-            let uplink = self.uplink.lock().expect("uplink lock poisoned");
+            let uplink = self.uplink.lock_recover();
             match uplink.as_ref() {
                 Some(f) => f(frame.clone()),
                 None => {
@@ -321,8 +319,9 @@ impl GatewayTask {
                 tokio::spawn(async move {
                     match forward_upstream(upstream, &raw_query, UPSTREAM_DNS_TIMEOUT).await {
                         Some(resp) => {
-                            let frame = respond.build_frame(&resp);
-                            let _ = tx.send(Bytes::from(frame)).await;
+                            if let Some(frame) = respond.build_frame(&resp) {
+                                let _ = tx.send(Bytes::from(frame)).await;
+                            }
                         }
                         None => {
                             debug!(segment = %segment, %upstream, "upstream DNS query failed");
@@ -400,7 +399,7 @@ mod tests {
         b[236..240].copy_from_slice(&[99, 130, 83, 99]);
         b.extend_from_slice(&[53, 1, 1]); // DISCOVER
         b.push(255);
-        let udp = udp_build(Ipv4Addr::UNSPECIFIED, Ipv4Addr::BROADCAST, 68, 67, &b);
+        let udp = udp_build(Ipv4Addr::UNSPECIFIED, Ipv4Addr::BROADCAST, 68, 67, &b).unwrap();
         let ip = ipv4_build(
             Ipv4Addr::UNSPECIFIED,
             Ipv4Addr::BROADCAST,
@@ -408,7 +407,8 @@ mod tests {
             64,
             &udp,
             1,
-        );
+        )
+        .unwrap();
         crate::net::frame::eth_build(MAC_BROADCAST, mac, ETHERTYPE_IPV4, &ip)
     }
 
@@ -494,7 +494,7 @@ mod tests {
         let mut guest = sw.add_channel_port(PortClass::Guest { isolated: false });
 
         let echo = icmp_build(ICMP_ECHO_REQUEST, 0, [0xAB, 0xCD, 0, 1], b"ping!");
-        let ipp = ipv4_build(GUEST_IP, gw.gw_ip(), IPPROTO_ICMP, 64, &echo, 7);
+        let ipp = ipv4_build(GUEST_IP, gw.gw_ip(), IPPROTO_ICMP, 64, &echo, 7).unwrap();
         let frame = eth_build(gw.gw_mac(), GUEST_MAC, ETHERTYPE_IPV4, &ipp);
         guest.tx.send(Bytes::from(frame)).await.unwrap();
 
@@ -530,8 +530,8 @@ mod tests {
             q.extend_from_slice(&[0, 1, 0, 1]); // A IN
             q
         };
-        let udp = udp_build(GUEST_IP, gw.gw_ip(), 33000, 53, &q);
-        let ipp = ipv4_build(GUEST_IP, gw.gw_ip(), IPPROTO_UDP, 64, &udp, 9);
+        let udp = udp_build(GUEST_IP, gw.gw_ip(), 33000, 53, &q).unwrap();
+        let ipp = ipv4_build(GUEST_IP, gw.gw_ip(), IPPROTO_UDP, 64, &udp, 9).unwrap();
         let frame = eth_build(gw.gw_mac(), GUEST_MAC, ETHERTYPE_IPV4, &ipp);
         guest.tx.send(Bytes::from(frame)).await.unwrap();
 
@@ -560,7 +560,7 @@ mod tests {
             let _ = utx.send(f);
         }));
 
-        let udp = udp_build(GUEST_IP, Ipv4Addr::new(8, 8, 8, 8), 5555, 443, b"hello");
+        let udp = udp_build(GUEST_IP, Ipv4Addr::new(8, 8, 8, 8), 5555, 443, b"hello").unwrap();
         let ipp = ipv4_build(
             GUEST_IP,
             Ipv4Addr::new(8, 8, 8, 8),
@@ -568,7 +568,8 @@ mod tests {
             64,
             &udp,
             21,
-        );
+        )
+        .unwrap();
         let frame = Bytes::from(eth_build(gw.gw_mac(), GUEST_MAC, ETHERTYPE_IPV4, &ipp));
         guest.tx.send(frame.clone()).await.unwrap();
 
@@ -607,8 +608,9 @@ mod tests {
                 options: &[],
             },
             &[],
-        );
-        let ipp = ipv4_build(GUEST_IP, gw.gw_ip(), 6, 64, &tcp, 22);
+        )
+        .unwrap();
+        let ipp = ipv4_build(GUEST_IP, gw.gw_ip(), 6, 64, &tcp, 22).unwrap();
         let frame = Bytes::from(eth_build(gw.gw_mac(), GUEST_MAC, ETHERTYPE_IPV4, &ipp));
         guest.tx.send(frame.clone()).await.unwrap();
 

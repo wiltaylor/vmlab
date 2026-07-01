@@ -11,6 +11,7 @@
 //! I/O via [`forward_upstream`] and rebuilds the reply frame from the
 //! returned [`DnsRespondCtx`]), or ignore.
 
+use crate::sync::LockRecover;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
@@ -260,16 +261,22 @@ pub struct DnsRespondCtx {
 
 impl DnsRespondCtx {
     /// Wrap a raw DNS message into the full server→client ethernet frame.
-    pub fn build_frame(&self, dns_payload: &[u8]) -> Vec<u8> {
+    /// `None` when the payload cannot fit an IPv4 packet.
+    pub fn build_frame(&self, dns_payload: &[u8]) -> Option<Vec<u8>> {
         let udp = udp_build(
             self.server_ip,
             self.client_ip,
             DNS_PORT,
             self.client_port,
             dns_payload,
-        );
-        let ip = ipv4_build(self.server_ip, self.client_ip, IPPROTO_UDP, 64, &udp, 0);
-        eth_build(self.client_mac, self.server_mac, ETHERTYPE_IPV4, &ip)
+        )?;
+        let ip = ipv4_build(self.server_ip, self.client_ip, IPPROTO_UDP, 64, &udp, 0)?;
+        Some(eth_build(
+            self.client_mac,
+            self.server_mac,
+            ETHERTYPE_IPV4,
+            &ip,
+        ))
     }
 }
 
@@ -358,11 +365,14 @@ impl DnsServer {
             server_ip: ip.dst(),
             client_port: udp.src_port(),
         };
-        let reply = |payload: Vec<u8>| DnsAction::Reply(respond.build_frame(&payload));
+        let reply = |payload: Vec<u8>| match respond.build_frame(&payload) {
+            Some(frame) => DnsAction::Reply(frame),
+            None => DnsAction::Ignore,
+        };
         let nxdomain = || reply(build_response(msg, question_end, RCODE_NXDOMAIN, None));
 
         let (answer, upstream) = {
-            let zone = self.zone.lock().expect("dns zone lock poisoned");
+            let zone = self.zone.lock_recover();
             (zone.lookup(&qname), zone.upstream)
         };
 
@@ -567,8 +577,8 @@ mod tests {
 
     fn query_frame(id: u16, name: &str, qtype: u16) -> Vec<u8> {
         let q = build_query(id, name, qtype);
-        let udp = udp_build(CLIENT_IP, SERVER_IP, CLIENT_PORT, DNS_PORT, &q);
-        let ipp = ipv4_build(CLIENT_IP, SERVER_IP, IPPROTO_UDP, 64, &udp, 3);
+        let udp = udp_build(CLIENT_IP, SERVER_IP, CLIENT_PORT, DNS_PORT, &q).unwrap();
+        let ipp = ipv4_build(CLIENT_IP, SERVER_IP, IPPROTO_UDP, 64, &udp, 3).unwrap();
         eth_build(SERVER_MAC, CLIENT_MAC, ETHERTYPE_IPV4, &ipp)
     }
 
@@ -718,8 +728,8 @@ mod tests {
         q.extend_from_slice(b"internal");
         q.push(0);
         q.extend_from_slice(&[0, 1, 0, 1]); // A IN
-        let udp = udp_build(CLIENT_IP, SERVER_IP, CLIENT_PORT, DNS_PORT, &q);
-        let ipp = ipv4_build(CLIENT_IP, SERVER_IP, IPPROTO_UDP, 64, &udp, 3);
+        let udp = udp_build(CLIENT_IP, SERVER_IP, CLIENT_PORT, DNS_PORT, &q).unwrap();
+        let ipp = ipv4_build(CLIENT_IP, SERVER_IP, IPPROTO_UDP, 64, &udp, 3).unwrap();
         let frame = eth_build(SERVER_MAC, CLIENT_MAC, ETHERTYPE_IPV4, &ipp);
 
         let DnsAction::Reply(reply) = server.handle(&frame) else {
@@ -866,7 +876,7 @@ mod tests {
             0,
             None,
         );
-        let frame = ctx.build_frame(&payload);
+        let frame = ctx.build_frame(&payload).unwrap();
         let (id, rcode, ancount, _) = parse_reply(&frame);
         assert_eq!(id, 9);
         assert_eq!(rcode, RCODE_NOERROR);
@@ -877,15 +887,15 @@ mod tests {
     fn ignores_non_dns_and_malformed() {
         let server = DnsServer::new(DnsZone::new("vmlab.internal"));
         // Wrong UDP port.
-        let udp = udp_build(CLIENT_IP, SERVER_IP, 1000, 123, b"x");
-        let ipp = ipv4_build(CLIENT_IP, SERVER_IP, IPPROTO_UDP, 64, &udp, 1);
+        let udp = udp_build(CLIENT_IP, SERVER_IP, 1000, 123, b"x").unwrap();
+        let ipp = ipv4_build(CLIENT_IP, SERVER_IP, IPPROTO_UDP, 64, &udp, 1).unwrap();
         let f = eth_build(SERVER_MAC, CLIENT_MAC, ETHERTYPE_IPV4, &ipp);
         assert!(matches!(server.handle(&f), DnsAction::Ignore));
         // A DNS *response* (QR set) is ignored.
         let mut q = build_query(1, "a.b", QTYPE_A);
         q[2] |= 0x80;
-        let udp = udp_build(CLIENT_IP, SERVER_IP, CLIENT_PORT, DNS_PORT, &q);
-        let ipp = ipv4_build(CLIENT_IP, SERVER_IP, IPPROTO_UDP, 64, &udp, 1);
+        let udp = udp_build(CLIENT_IP, SERVER_IP, CLIENT_PORT, DNS_PORT, &q).unwrap();
+        let ipp = ipv4_build(CLIENT_IP, SERVER_IP, IPPROTO_UDP, 64, &udp, 1).unwrap();
         let f = eth_build(SERVER_MAC, CLIENT_MAC, ETHERTYPE_IPV4, &ipp);
         assert!(matches!(server.handle(&f), DnsAction::Ignore));
         // Truncation sweep never panics.

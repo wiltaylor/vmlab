@@ -7,6 +7,7 @@
 //!   (those addressed to the gateway MAC) — `block` drops with a synthesised
 //!   RST/ICMP reply back to the guest, `redirect` DNATs in place.
 
+use crate::sync::LockRecover;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
@@ -57,7 +58,7 @@ impl SegmentServices {
             let guest_mac = eth.src_mac();
             let ipv4 = eth.payload();
             let verdict = {
-                let rs = hook_rules.lock().expect("ruleset poisoned");
+                let rs = hook_rules.lock_recover();
                 rs.eval(ipv4)
             };
             match verdict {
@@ -118,7 +119,7 @@ fn spawn_nat(
                     .filter(|eth| eth.ethertype() == ETHERTYPE_IPV4)
                     .and_then(|eth| {
                         let verdict = {
-                            let rs = rules.lock().expect("ruleset poisoned");
+                            let rs = rules.lock_recover();
                             rs.eval_return(eth.payload())
                         };
                         match verdict {
@@ -160,7 +161,7 @@ pub fn preinstall_rules(
     seg: &crate::config::model::Segment,
     _lab: &crate::config::model::Lab,
 ) {
-    let mut rs = services.rules.lock().expect("ruleset poisoned");
+    let mut rs = services.rules.lock_recover();
     for b in &seg.block_rules {
         rs.add_block(b.clone());
     }
@@ -195,10 +196,7 @@ impl SegmentServices {
         let id = self
             .next_forward_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.forwards
-            .lock()
-            .expect("forwards poisoned")
-            .push((id, handle));
+        self.forwards.lock_recover().push((id, handle));
         Ok(id)
     }
 
@@ -207,7 +205,7 @@ impl SegmentServices {
     /// completes the add/remove contract for dynamic (scripted) forwards.
     #[allow(dead_code)]
     pub fn remove_forward(&self, id: u64) -> bool {
-        let mut fwds = self.forwards.lock().expect("forwards poisoned");
+        let mut fwds = self.forwards.lock_recover();
         if let Some(pos) = fwds.iter().position(|(fid, _)| *fid == id) {
             let (_, handle) = fwds.remove(pos);
             handle.abort();

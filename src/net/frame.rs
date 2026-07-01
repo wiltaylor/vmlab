@@ -3,7 +3,8 @@
 //! Views are zero-copy wrappers over `&[u8]` that validate length and basic
 //! structure on construction; every parser returns `Option` and never panics
 //! on truncated or malformed input. Builders return owned `Vec<u8>` with all
-//! checksums computed.
+//! checksums computed, or `None` when a payload cannot fit the protocol's
+//! 16-bit length fields (guest-supplied sizes must never panic the daemon).
 
 use std::net::Ipv4Addr;
 
@@ -80,16 +81,18 @@ pub fn internet_checksum(data: &[u8]) -> u16 {
 /// Internet checksum over the IPv4 pseudo-header (src, dst, zero, proto,
 /// length) followed by the full L4 segment. Used by UDP, TCP and (without
 /// effect of the pseudo-header) verified against zero for valid segments.
-pub fn l4_checksum(src: Ipv4Addr, dst: Ipv4Addr, proto: u8, segment: &[u8]) -> u16 {
+/// `None` when the segment cannot fit an IPv4 packet's 16-bit length —
+/// guest-supplied sizes must never panic the daemon.
+pub fn l4_checksum(src: Ipv4Addr, dst: Ipv4Addr, proto: u8, segment: &[u8]) -> Option<u16> {
+    let len = u16::try_from(segment.len()).ok()?;
     let mut buf = Vec::with_capacity(12 + segment.len());
     buf.extend_from_slice(&src.octets());
     buf.extend_from_slice(&dst.octets());
     buf.push(0);
     buf.push(proto);
-    let len = u16::try_from(segment.len()).expect("l4 segment too large");
     buf.extend_from_slice(&len.to_be_bytes());
     buf.extend_from_slice(segment);
-    internet_checksum(&buf)
+    Some(internet_checksum(&buf))
 }
 
 // ---------------------------------------------------------------------------
@@ -345,9 +348,8 @@ pub fn ipv4_build(
     ttl: u8,
     payload: &[u8],
     id: u16,
-) -> Vec<u8> {
-    let total_len =
-        u16::try_from(IPV4_MIN_HEADER_LEN + payload.len()).expect("ipv4 payload too large");
+) -> Option<Vec<u8>> {
+    let total_len = u16::try_from(IPV4_MIN_HEADER_LEN + payload.len()).ok()?;
     let mut p = Vec::with_capacity(IPV4_MIN_HEADER_LEN + payload.len());
     p.push(0x45); // version 4, IHL 5
     p.push(0); // DSCP/ECN
@@ -362,7 +364,7 @@ pub fn ipv4_build(
     let csum = internet_checksum(&p);
     p[10..12].copy_from_slice(&csum.to_be_bytes());
     p.extend_from_slice(payload);
-    p
+    Some(p)
 }
 
 // ---------------------------------------------------------------------------
@@ -422,7 +424,7 @@ impl<'a> UdpView<'a> {
         if self.checksum() == 0 {
             return true;
         }
-        l4_checksum(src, dst, IPPROTO_UDP, &self.buf[..usize::from(self.len())]) == 0
+        l4_checksum(src, dst, IPPROTO_UDP, &self.buf[..usize::from(self.len())]) == Some(0)
     }
 }
 
@@ -434,20 +436,20 @@ pub fn udp_build(
     src_port: u16,
     dst_port: u16,
     payload: &[u8],
-) -> Vec<u8> {
-    let len = u16::try_from(UDP_HEADER_LEN + payload.len()).expect("udp payload too large");
+) -> Option<Vec<u8>> {
+    let len = u16::try_from(UDP_HEADER_LEN + payload.len()).ok()?;
     let mut p = Vec::with_capacity(UDP_HEADER_LEN + payload.len());
     p.extend_from_slice(&src_port.to_be_bytes());
     p.extend_from_slice(&dst_port.to_be_bytes());
     p.extend_from_slice(&len.to_be_bytes());
     p.extend_from_slice(&[0, 0]); // checksum placeholder
     p.extend_from_slice(payload);
-    let csum = match l4_checksum(src_ip, dst_ip, IPPROTO_UDP, &p) {
+    let csum = match l4_checksum(src_ip, dst_ip, IPPROTO_UDP, &p)? {
         0 => 0xFFFF,
         c => c,
     };
     p[6..8].copy_from_slice(&csum.to_be_bytes());
-    p
+    Some(p)
 }
 
 // ---------------------------------------------------------------------------
@@ -545,7 +547,7 @@ impl<'a> TcpView<'a> {
 
     /// Verify the checksum against the IPv4 pseudo-header.
     pub fn checksum_valid(&self, src: Ipv4Addr, dst: Ipv4Addr) -> bool {
-        l4_checksum(src, dst, IPPROTO_TCP, self.buf) == 0
+        l4_checksum(src, dst, IPPROTO_TCP, self.buf) == Some(0)
     }
 }
 
@@ -570,7 +572,7 @@ pub fn tcp_build(
     dst_ip: Ipv4Addr,
     fields: TcpFields<'_>,
     payload: &[u8],
-) -> Vec<u8> {
+) -> Option<Vec<u8>> {
     let opts = &fields.options[..fields.options.len().min(TCP_MAX_OPTIONS_LEN)];
     let opts_padded = opts.len().div_ceil(4) * 4;
     let header_len = TCP_MIN_HEADER_LEN + opts_padded;
@@ -587,9 +589,9 @@ pub fn tcp_build(
     p.extend_from_slice(opts);
     p.resize(header_len, 0); // option padding (end-of-options)
     p.extend_from_slice(payload);
-    let csum = l4_checksum(src_ip, dst_ip, IPPROTO_TCP, &p);
+    let csum = l4_checksum(src_ip, dst_ip, IPPROTO_TCP, &p)?;
     p[16..18].copy_from_slice(&csum.to_be_bytes());
-    p
+    Some(p)
 }
 
 // ---------------------------------------------------------------------------
@@ -669,14 +671,7 @@ pub fn icmp_echo_reply_for(request_ipv4_packet: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
     let reply = icmp_build(ICMP_ECHO_REPLY, 0, icmp.rest(), icmp.payload());
-    Some(ipv4_build(
-        ip.dst(),
-        ip.src(),
-        IPPROTO_ICMP,
-        64,
-        &reply,
-        ip.id(),
-    ))
+    ipv4_build(ip.dst(), ip.src(), IPPROTO_ICMP, 64, &reply, ip.id())
 }
 
 /// Build an ICMP destination-unreachable message (type 3, the given code)
@@ -817,7 +812,7 @@ mod tests {
 
     #[test]
     fn ipv4_roundtrip_and_checksum() {
-        let p = ipv4_build(IP_A, IP_B, IPPROTO_UDP, 64, b"payload", 0x1234);
+        let p = ipv4_build(IP_A, IP_B, IPPROTO_UDP, 64, b"payload", 0x1234).unwrap();
         let v = Ipv4View::parse(&p).unwrap();
         assert_eq!(v.version(), 4);
         assert_eq!(v.ihl(), 5);
@@ -839,7 +834,7 @@ mod tests {
 
     #[test]
     fn ipv4_corrupt_checksum_detected() {
-        let mut p = ipv4_build(IP_A, IP_B, IPPROTO_TCP, 64, b"x", 1);
+        let mut p = ipv4_build(IP_A, IP_B, IPPROTO_TCP, 64, b"x", 1).unwrap();
         p[8] = p[8].wrapping_add(1); // mutate TTL without fixing checksum
         let v = Ipv4View::parse(&p).unwrap();
         assert!(!v.checksum_valid());
@@ -888,7 +883,7 @@ mod tests {
     #[test]
     fn ipv4_honours_total_len_with_padding() {
         // Ethernet pads short frames; the view must clip to total_len.
-        let mut p = ipv4_build(IP_A, IP_B, IPPROTO_UDP, 64, b"ab", 7);
+        let mut p = ipv4_build(IP_A, IP_B, IPPROTO_UDP, 64, b"ab", 7).unwrap();
         p.extend_from_slice(&[0u8; 18]); // trailing pad
         let v = Ipv4View::parse(&p).unwrap();
         assert_eq!(v.payload(), b"ab");
@@ -896,7 +891,7 @@ mod tests {
 
     #[test]
     fn ipv4_rejects_malformed() {
-        let p = ipv4_build(IP_A, IP_B, IPPROTO_UDP, 64, b"payload", 9);
+        let p = ipv4_build(IP_A, IP_B, IPPROTO_UDP, 64, b"payload", 9).unwrap();
         for n in 0..IPV4_MIN_HEADER_LEN {
             assert!(Ipv4View::parse(&p[..n]).is_none(), "len {n} parsed");
         }
@@ -921,7 +916,7 @@ mod tests {
 
     #[test]
     fn udp_roundtrip_with_pseudo_header_checksum() {
-        let d = udp_build(IP_A, IP_B, 5353, 53, b"query");
+        let d = udp_build(IP_A, IP_B, 5353, 53, b"query").unwrap();
         let v = UdpView::parse(&d).unwrap();
         assert_eq!(v.src_port(), 5353);
         assert_eq!(v.dst_port(), 53);
@@ -939,14 +934,14 @@ mod tests {
 
     #[test]
     fn udp_zero_checksum_accepted() {
-        let mut d = udp_build(IP_A, IP_B, 1, 2, b"x");
+        let mut d = udp_build(IP_A, IP_B, 1, 2, b"x").unwrap();
         d[6..8].copy_from_slice(&[0, 0]);
         assert!(UdpView::parse(&d).unwrap().checksum_valid(IP_A, IP_B));
     }
 
     #[test]
     fn udp_rejects_malformed() {
-        let d = udp_build(IP_A, IP_B, 1, 2, b"abc");
+        let d = udp_build(IP_A, IP_B, 1, 2, b"abc").unwrap();
         for n in 0..UDP_HEADER_LEN {
             assert!(UdpView::parse(&d[..n]).is_none(), "len {n} parsed");
         }
@@ -971,7 +966,7 @@ mod tests {
             window: 65000,
             options: &[0x02, 0x04, 0x05, 0xB4, 0x01], // MSS + NOP (5 bytes, padded to 8)
         };
-        let s = tcp_build(IP_A, IP_B, fields, b"data");
+        let s = tcp_build(IP_A, IP_B, fields, b"data").unwrap();
         let v = TcpView::parse(&s).unwrap();
         assert_eq!(v.src_port(), 49152);
         assert_eq!(v.dst_port(), 443);
@@ -1003,7 +998,7 @@ mod tests {
             window: 0,
             options: &[],
         };
-        let s = tcp_build(IP_A, IP_B, fields, b"");
+        let s = tcp_build(IP_A, IP_B, fields, b"").unwrap();
         let v = TcpView::parse(&s).unwrap();
         assert_eq!(v.data_offset(), 20);
         assert!(v.options().is_empty());
@@ -1024,7 +1019,7 @@ mod tests {
             window: 100,
             options: &[],
         };
-        let s = tcp_build(IP_A, IP_B, fields, b"abc");
+        let s = tcp_build(IP_A, IP_B, fields, b"abc").unwrap();
         for n in 0..TCP_MIN_HEADER_LEN {
             assert!(TcpView::parse(&s[..n]).is_none(), "len {n} parsed");
         }
@@ -1061,7 +1056,7 @@ mod tests {
     #[test]
     fn icmp_echo_reply_for_request() {
         let echo = icmp_build(ICMP_ECHO_REQUEST, 0, [0x12, 0x34, 0x00, 0x07], b"abcdefgh");
-        let req = ipv4_build(IP_A, IP_B, IPPROTO_ICMP, 64, &echo, 42);
+        let req = ipv4_build(IP_A, IP_B, IPPROTO_ICMP, 64, &echo, 42).unwrap();
         let reply = icmp_echo_reply_for(&req).unwrap();
         let ip = Ipv4View::parse(&reply).unwrap();
         assert_eq!(ip.src(), IP_B);
@@ -1078,12 +1073,12 @@ mod tests {
     #[test]
     fn icmp_echo_reply_rejects_non_echo() {
         // Not ICMP at all.
-        let udp = udp_build(IP_A, IP_B, 1, 2, b"x");
-        let p = ipv4_build(IP_A, IP_B, IPPROTO_UDP, 64, &udp, 1);
+        let udp = udp_build(IP_A, IP_B, 1, 2, b"x").unwrap();
+        let p = ipv4_build(IP_A, IP_B, IPPROTO_UDP, 64, &udp, 1).unwrap();
         assert!(icmp_echo_reply_for(&p).is_none());
         // ICMP but not an echo request.
         let m = icmp_build(ICMP_ECHO_REPLY, 0, [0; 4], b"");
-        let p = ipv4_build(IP_A, IP_B, IPPROTO_ICMP, 64, &m, 1);
+        let p = ipv4_build(IP_A, IP_B, IPPROTO_ICMP, 64, &m, 1).unwrap();
         assert!(icmp_echo_reply_for(&p).is_none());
         // Truncated input.
         assert!(icmp_echo_reply_for(&[0x45, 0x00]).is_none());
@@ -1091,8 +1086,8 @@ mod tests {
 
     #[test]
     fn icmp_unreachable_quotes_header_plus_8() {
-        let udp = udp_build(IP_A, IP_B, 1000, 2000, b"0123456789abcdef");
-        let orig = ipv4_build(IP_A, IP_B, IPPROTO_UDP, 64, &udp, 5);
+        let udp = udp_build(IP_A, IP_B, 1000, 2000, b"0123456789abcdef").unwrap();
+        let orig = ipv4_build(IP_A, IP_B, IPPROTO_UDP, 64, &udp, 5).unwrap();
         let m = icmp_unreachable_for(&orig, 3); // port unreachable
         let v = IcmpView::parse(&m).unwrap();
         assert_eq!(v.icmp_type(), ICMP_DEST_UNREACHABLE);
@@ -1103,6 +1098,29 @@ mod tests {
         // Truncated original must not panic and quotes what exists.
         let m = icmp_unreachable_for(&orig[..10], 1);
         assert_eq!(IcmpView::parse(&m).unwrap().payload(), &orig[..10]);
+    }
+
+    /// Payloads that cannot fit a 16-bit length field must yield `None`,
+    /// never panic — the sizes can be steered by guest traffic.
+    #[test]
+    fn oversized_payloads_build_none() {
+        let big = vec![0u8; 70_000];
+        assert!(l4_checksum(IP_A, IP_B, IPPROTO_UDP, &big).is_none());
+        assert!(udp_build(IP_A, IP_B, 1, 2, &big).is_none());
+        assert!(ipv4_build(IP_A, IP_B, IPPROTO_UDP, 64, &big, 0).is_none());
+        let fields = TcpFields {
+            src_port: 1,
+            dst_port: 2,
+            seq: 0,
+            ack: 0,
+            flags: TCP_ACK,
+            window: 0,
+            options: &[],
+        };
+        assert!(tcp_build(IP_A, IP_B, fields, &big).is_none());
+        // Just under the limit still builds.
+        let max_udp = vec![0u8; usize::from(u16::MAX) - UDP_HEADER_LEN];
+        assert!(udp_build(IP_A, IP_B, 1, 2, &max_udp).is_some());
     }
 
     // --- fuzz-ish truncation sweep ---
@@ -1118,8 +1136,8 @@ mod tests {
             window: 1024,
             options: &[0x01, 0x01],
         };
-        let tcp = tcp_build(IP_A, IP_B, fields, b"body");
-        let ip = ipv4_build(IP_A, IP_B, IPPROTO_TCP, 64, &tcp, 99);
+        let tcp = tcp_build(IP_A, IP_B, fields, b"body").unwrap();
+        let ip = ipv4_build(IP_A, IP_B, IPPROTO_TCP, 64, &tcp, 99).unwrap();
         let frame = eth_build(mac(1), mac(2), ETHERTYPE_IPV4, &ip);
         for n in 0..=frame.len() {
             let b = &frame[..n];

@@ -150,15 +150,16 @@ async fn guest_tcp(
             options,
         },
         payload,
-    );
-    let pkt = frame::ipv4_build(GUEST_IP, dst.0, IPPROTO_TCP, 64, &seg, 7);
+    )
+    .unwrap();
+    let pkt = frame::ipv4_build(GUEST_IP, dst.0, IPPROTO_TCP, 64, &seg, 7).unwrap();
     let f = frame::eth_build(GW_MAC, GUEST_MAC, ETHERTYPE_IPV4, &pkt);
     engine.handle_frame(Bytes::from(f)).await;
 }
 
 async fn guest_udp(engine: &Arc<NatEngine>, sport: u16, dst: (Ipv4Addr, u16), payload: &[u8]) {
-    let seg = frame::udp_build(GUEST_IP, dst.0, sport, dst.1, payload);
-    let pkt = frame::ipv4_build(GUEST_IP, dst.0, IPPROTO_UDP, 64, &seg, 8);
+    let seg = frame::udp_build(GUEST_IP, dst.0, sport, dst.1, payload).unwrap();
+    let pkt = frame::ipv4_build(GUEST_IP, dst.0, IPPROTO_UDP, 64, &seg, 8).unwrap();
     let f = frame::eth_build(GW_MAC, GUEST_MAC, ETHERTYPE_IPV4, &pkt);
     engine.handle_frame(Bytes::from(f)).await;
 }
@@ -170,7 +171,7 @@ async fn guest_icmp_echo(engine: &Arc<NatEngine>, dst: Ipv4Addr, id: u16, body: 
         [(id >> 8) as u8, id as u8, 0, 1],
         body,
     );
-    let pkt = frame::ipv4_build(GUEST_IP, dst, IPPROTO_ICMP, 64, &m, 9);
+    let pkt = frame::ipv4_build(GUEST_IP, dst, IPPROTO_ICMP, 64, &m, 9).unwrap();
     let f = frame::eth_build(GW_MAC, GUEST_MAC, ETHERTYPE_IPV4, &pkt);
     engine.handle_frame(Bytes::from(f)).await;
 }

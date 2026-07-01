@@ -19,6 +19,7 @@ mod qmp;
 mod scripting;
 mod smb;
 mod supervisor;
+mod sync;
 mod template;
 mod viewer;
 mod vision;

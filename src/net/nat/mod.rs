@@ -55,6 +55,7 @@ pub use forward::PortForwarder;
 pub use icmp::{Pinger, SubprocessPinger};
 pub use vtcp::{FlowKey, GuestStream};
 
+use crate::sync::LockRecover;
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
@@ -150,7 +151,7 @@ impl NatEngine {
 
     /// Prime the IP → MAC table (the gateway sees ARP/DHCP and knows best).
     pub fn learn_mac(&self, ip: Ipv4Addr, mac: MacAddr) {
-        self.macs.lock().expect("macs lock").insert(ip, mac);
+        self.macs.lock_recover().insert(ip, mac);
     }
 
     /// Entry point: one guest→world IPv4 ethernet frame (dst MAC = gateway).
@@ -189,12 +190,7 @@ impl NatEngine {
             dst_port: tcp.dst_port(),
         };
         let seg = vtcp::Segment::from_view(&tcp);
-        let tx = self
-            .tcp_flows
-            .lock()
-            .expect("tcp flows lock")
-            .get(&key)
-            .cloned();
+        let tx = self.tcp_flows.lock_recover().get(&key).cloned();
         if let Some(tx) = tx {
             // Full channel = flow is drowning; drop, the guest retransmits.
             let _ = tx.try_send(seg);
@@ -203,15 +199,13 @@ impl NatEngine {
         if seg.is_syn() && !seg.is_ack() {
             debug!(?key, "nat: passive vtcp open");
             let (tx, rx) = mpsc::channel(64);
-            self.tcp_flows
-                .lock()
-                .expect("tcp flows lock")
-                .insert(key, tx);
+            self.tcp_flows.lock_recover().insert(key, tx);
             vtcp::spawn_passive(self.clone(), key, src_mac, seg, rx);
         } else if !seg.is_rst() {
             // Anything unexpected for an unknown flow: reset it.
-            let rst = vtcp::rst_for(ip, &tcp, self.next_ip_id());
-            self.send_frame(src_mac, &rst).await;
+            if let Some(rst) = vtcp::rst_for(ip, &tcp, self.next_ip_id()) {
+                self.send_frame(src_mac, &rst).await;
+            }
         }
     }
 
@@ -222,12 +216,7 @@ impl NatEngine {
         if ip.dst() == self.cfg.gw_ip {
             // Reply to an engine-originated flow (udp_bind_guest_flow).
             let key = (ip.src(), udp_seg.src_port(), udp_seg.dst_port());
-            let tx = self
-                .guest_udp
-                .lock()
-                .expect("guest udp lock")
-                .get(&key)
-                .cloned();
+            let tx = self.guest_udp.lock_recover().get(&key).cloned();
             if let Some(tx) = tx {
                 let _ = tx.send(udp_seg.payload().to_vec()).await;
             }
@@ -305,7 +294,7 @@ impl NatEngine {
         let (to_guest_tx, mut to_guest_rx) = mpsc::channel::<Vec<u8>>(64);
         let (from_guest_tx, from_guest_rx) = mpsc::channel::<Vec<u8>>(64);
         let gw_port = {
-            let mut table = self.guest_udp.lock().expect("guest udp lock");
+            let mut table = self.guest_udp.lock_recover();
             let port = loop {
                 let p = self.next_ephemeral();
                 if !table.contains_key(&(guest_ip, guest_port, p)) {
@@ -330,8 +319,7 @@ impl NatEngine {
             }
             engine
                 .guest_udp
-                .lock()
-                .expect("guest udp lock")
+                .lock_recover()
                 .remove(&(guest_ip, guest_port, gw_port));
         });
         (to_guest_tx, from_guest_rx)
@@ -341,8 +329,7 @@ impl NatEngine {
 
     fn guest_mac(&self, ip: Ipv4Addr) -> MacAddr {
         self.macs
-            .lock()
-            .expect("macs lock")
+            .lock_recover()
             .get(&ip)
             .copied()
             .unwrap_or(MAC_BROADCAST)
@@ -367,7 +354,7 @@ impl NatEngine {
         tx: mpsc::Sender<vtcp::Segment>,
     ) -> Result<FlowKey> {
         use std::collections::hash_map::Entry;
-        let mut table = self.tcp_flows.lock().expect("tcp flows lock");
+        let mut table = self.tcp_flows.lock_recover();
         for _ in 0..16384 {
             let key = FlowKey {
                 guest_ip,
@@ -384,7 +371,7 @@ impl NatEngine {
     }
 
     fn remove_tcp_flow(&self, key: &FlowKey) {
-        self.tcp_flows.lock().expect("tcp flows lock").remove(key);
+        self.tcp_flows.lock_recover().remove(key);
     }
 
     /// Wrap an IPv4 packet in ethernet (src = gateway MAC) and emit it.
@@ -400,8 +387,10 @@ impl NatEngine {
         dst: (Ipv4Addr, u16),
         payload: &[u8],
     ) {
-        let seg = frame::udp_build(src.0, dst.0, src.1, dst.1, payload);
-        let pkt = frame::ipv4_build(src.0, dst.0, IPPROTO_UDP, 64, &seg, self.next_ip_id());
+        let pkt = frame::udp_build(src.0, dst.0, src.1, dst.1, payload).and_then(|seg| {
+            frame::ipv4_build(src.0, dst.0, IPPROTO_UDP, 64, &seg, self.next_ip_id())
+        });
+        let Some(pkt) = pkt else { return };
         self.send_frame(dst_mac, &pkt).await;
     }
 }

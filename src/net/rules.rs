@@ -28,6 +28,7 @@
 //! immediately stops new rewrites ([`RuleSet::remove`] restores `Pass`),
 //! while established return-path entries linger until they idle out.
 
+use crate::sync::LockRecover;
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::sync::Mutex;
@@ -302,10 +303,12 @@ impl RuleSet {
                     orig_port: meta.dst_port,
                     last: Instant::now(),
                 };
-                self.conns.lock().expect("conns lock").insert(key, val);
+                self.conns.lock_recover().insert(key, val);
             }
-            let out = rewrite_packet(ipv4_packet, &ip, None, Some((new_ip, new_port)));
-            return Verdict::Rewrite(out);
+            if let Some(out) = rewrite_packet(ipv4_packet, &ip, None, Some((new_ip, new_port))) {
+                return Verdict::Rewrite(out);
+            }
+            return Verdict::Pass;
         }
 
         // Layer 2: blocks.
@@ -337,7 +340,7 @@ impl RuleSet {
             proto: ip.proto(),
         };
         let rev = {
-            let mut conns = self.conns.lock().expect("conns lock");
+            let mut conns = self.conns.lock_recover();
             match conns.get_mut(&key) {
                 Some(v) if v.last.elapsed() < CONN_IDLE => {
                     v.last = Instant::now();
@@ -346,13 +349,10 @@ impl RuleSet {
                 _ => None,
             }
         };
-        match rev {
-            Some(v) => Verdict::Rewrite(rewrite_packet(
-                ipv4_packet,
-                &ip,
-                Some((v.orig_ip, v.orig_port)),
-                None,
-            )),
+        match rev
+            .and_then(|v| rewrite_packet(ipv4_packet, &ip, Some((v.orig_ip, v.orig_port)), None))
+        {
+            Some(out) => Verdict::Rewrite(out),
             None => Verdict::Pass,
         }
     }
@@ -360,11 +360,11 @@ impl RuleSet {
     /// Number of live translation entries (diagnostics; asserted by tests).
     #[allow(dead_code)]
     pub fn conn_count(&self) -> usize {
-        self.conns.lock().expect("conns lock").len()
+        self.conns.lock_recover().len()
     }
 
     fn expire_conns(&self) {
-        let mut conns = self.conns.lock().expect("conns lock");
+        let mut conns = self.conns.lock_recover();
         if !conns.is_empty() {
             conns.retain(|_, v| v.last.elapsed() < CONN_IDLE);
         }
@@ -453,7 +453,7 @@ fn rewrite_packet(
     ip: &Ipv4View<'_>,
     new_src: Option<(Ipv4Addr, Option<u16>)>,
     new_dst: Option<(Ipv4Addr, Option<u16>)>,
-) -> Vec<u8> {
+) -> Option<Vec<u8>> {
     let total = usize::from(ip.total_len());
     let hl = ip.header_len();
     let mut out = pkt[..total].to_vec();
@@ -480,14 +480,14 @@ fn rewrite_packet(
     match ip.proto() {
         IPPROTO_TCP if out.len() >= hl + 18 => {
             out[hl + 16..hl + 18].copy_from_slice(&[0, 0]);
-            let c = frame::l4_checksum(src, dst, IPPROTO_TCP, &out[hl..]);
+            let c = frame::l4_checksum(src, dst, IPPROTO_TCP, &out[hl..])?;
             out[hl + 16..hl + 18].copy_from_slice(&c.to_be_bytes());
         }
         IPPROTO_UDP if out.len() >= hl + 8 => {
             let had_csum = out[hl + 6] != 0 || out[hl + 7] != 0;
             if had_csum {
                 out[hl + 6..hl + 8].copy_from_slice(&[0, 0]);
-                let c = match frame::l4_checksum(src, dst, IPPROTO_UDP, &out[hl..]) {
+                let c = match frame::l4_checksum(src, dst, IPPROTO_UDP, &out[hl..])? {
                     0 => 0xFFFF,
                     c => c,
                 };
@@ -500,7 +500,7 @@ fn rewrite_packet(
     out[10..12].copy_from_slice(&[0, 0]);
     let c = frame::internet_checksum(&out[..hl]);
     out[10..12].copy_from_slice(&c.to_be_bytes());
-    out
+    Some(out)
 }
 
 // ---------------------------------------------------------------------------
@@ -538,37 +538,16 @@ fn block_reply(pkt: &[u8], ip: &Ipv4View<'_>) -> Option<Vec<u8>> {
                     options: &[],
                 },
                 &[],
-            );
-            Some(frame::ipv4_build(
-                ip.dst(),
-                ip.src(),
-                IPPROTO_TCP,
-                64,
-                &seg,
-                0,
-            ))
+            )?;
+            frame::ipv4_build(ip.dst(), ip.src(), IPPROTO_TCP, 64, &seg, 0)
         }
         IPPROTO_UDP => {
             let icmp = frame::icmp_unreachable_for(pkt, 3); // port unreachable
-            Some(frame::ipv4_build(
-                ip.dst(),
-                ip.src(),
-                IPPROTO_ICMP,
-                64,
-                &icmp,
-                0,
-            ))
+            frame::ipv4_build(ip.dst(), ip.src(), IPPROTO_ICMP, 64, &icmp, 0)
         }
         _ => {
             let icmp = frame::icmp_unreachable_for(pkt, 1); // host unreachable
-            Some(frame::ipv4_build(
-                ip.dst(),
-                ip.src(),
-                IPPROTO_ICMP,
-                64,
-                &icmp,
-                0,
-            ))
+            frame::ipv4_build(ip.dst(), ip.src(), IPPROTO_ICMP, 64, &icmp, 0)
         }
     }
 }
@@ -637,13 +616,14 @@ mod tests {
                 options: &[],
             },
             b"",
-        );
-        ipv4_build(src, dst, IPPROTO_TCP, 64, &seg, 42)
+        )
+        .unwrap();
+        ipv4_build(src, dst, IPPROTO_TCP, 64, &seg, 42).unwrap()
     }
 
     fn udp_pkt(src: Ipv4Addr, dst: Ipv4Addr, sport: u16, dport: u16, body: &[u8]) -> Vec<u8> {
-        let seg = udp_build(src, dst, sport, dport, body);
-        ipv4_build(src, dst, IPPROTO_UDP, 64, &seg, 43)
+        let seg = udp_build(src, dst, sport, dport, body).unwrap();
+        ipv4_build(src, dst, IPPROTO_UDP, 64, &seg, 43).unwrap()
     }
 
     fn icmp_echo_pkt(src: Ipv4Addr, dst: Ipv4Addr, id: u16, reply: bool) -> Vec<u8> {
@@ -653,7 +633,7 @@ mod tests {
             ICMP_ECHO_REQUEST
         };
         let m = icmp_build(t, 0, [(id >> 8) as u8, id as u8, 0, 1], b"pingpayload");
-        ipv4_build(src, dst, IPPROTO_ICMP, 64, &m, 44)
+        ipv4_build(src, dst, IPPROTO_ICMP, 64, &m, 44).unwrap()
     }
 
     fn assert_checksums_ok(pkt: &[u8]) {
@@ -1030,8 +1010,9 @@ mod tests {
                 options: &[],
             },
             b"data",
-        );
-        let p = ipv4_build(GUEST, DST_A, IPPROTO_TCP, 64, &seg, 1);
+        )
+        .unwrap();
+        let p = ipv4_build(GUEST, DST_A, IPPROTO_TCP, 64, &seg, 1).unwrap();
         let Verdict::Drop { reply: Some(r) } = rs.eval(&p) else {
             panic!("expected drop with reply");
         };

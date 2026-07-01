@@ -8,6 +8,7 @@ pub mod interact;
 pub mod keymap;
 mod runner;
 
+use crate::sync::LockRecover;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -503,7 +504,7 @@ pub fn lab_module() -> Module {
         .method(
             "mouse_move",
             |v: &VmHandle, x: i64, y: i64| -> Result<(), String> {
-                *v.last_pointer.lock().unwrap() = (x, y);
+                *v.last_pointer.lock_recover() = (x, y);
                 v.block(interact::mouse_move(&v.vm, x, y)).map_err(estr)
             },
         )
@@ -513,7 +514,7 @@ pub fn lab_module() -> Module {
                 // A click reuses the position the preceding move set; for QMP
                 // this is a no-op (QEMU retains the last absolute position),
                 // for VNC it is the click target.
-                let at = *v.last_pointer.lock().unwrap();
+                let at = *v.last_pointer.lock_recover();
                 v.block(interact::mouse_click(&v.vm, button, Some(at)))
                     .map_err(estr)
             },
@@ -521,7 +522,7 @@ pub fn lab_module() -> Module {
         .method(
             "mouse_drag",
             |v: &VmHandle, x1: i64, y1: i64, x2: i64, y2: i64| -> Result<(), String> {
-                *v.last_pointer.lock().unwrap() = (x2, y2);
+                *v.last_pointer.lock_recover() = (x2, y2);
                 v.block(interact::mouse_drag(&v.vm, x1, y1, x2, y2))
                     .map_err(estr)
             },

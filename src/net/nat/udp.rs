@@ -3,6 +3,7 @@
 //! replies back into frames, 60 s idle expiry. DNS to arbitrary servers
 //! works through this with zero configuration.
 
+use crate::sync::LockRecover;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
@@ -33,12 +34,7 @@ pub(super) async fn handle_outbound(
     guest_mac: MacAddr,
     payload: &[u8],
 ) {
-    let existing = engine
-        .udp_flows
-        .lock()
-        .expect("udp flows lock")
-        .get(&key)
-        .cloned();
+    let existing = engine.udp_flows.lock_recover().get(&key).cloned();
     let flow = match existing {
         Some(f) => f,
         None => {
@@ -57,17 +53,13 @@ pub(super) async fn handle_outbound(
                 sock: Arc::new(sock),
                 last_used: Arc::new(StdMutex::new(Instant::now())),
             };
-            engine
-                .udp_flows
-                .lock()
-                .expect("udp flows lock")
-                .insert(key, flow.clone());
+            engine.udp_flows.lock_recover().insert(key, flow.clone());
             spawn_reader(engine.clone(), key, guest_mac, flow.clone());
             trace!(?key, "nat: udp flow created");
             flow
         }
     };
-    *flow.last_used.lock().expect("udp last_used lock") = Instant::now();
+    *flow.last_used.lock_recover() = Instant::now();
     let _ = flow.sock.send(payload).await;
 }
 
@@ -79,7 +71,7 @@ fn spawn_reader(engine: Arc<NatEngine>, key: FlowKey, guest_mac: MacAddr, flow: 
         loop {
             match timeout(UDP_IDLE, flow.sock.recv(&mut buf)).await {
                 Ok(Ok(n)) => {
-                    *flow.last_used.lock().expect("udp last_used lock") = Instant::now();
+                    *flow.last_used.lock_recover() = Instant::now();
                     engine
                         .send_udp_to_guest(
                             guest_mac,
@@ -96,7 +88,7 @@ fn spawn_reader(engine: Arc<NatEngine>, key: FlowKey, guest_mac: MacAddr, flow: 
                     break;
                 }
                 Err(_elapsed) => {
-                    let idle = flow.last_used.lock().expect("udp last_used lock").elapsed();
+                    let idle = flow.last_used.lock_recover().elapsed();
                     if idle >= UDP_IDLE {
                         trace!(?key, "nat: udp flow idle, expiring");
                         break;
@@ -104,10 +96,6 @@ fn spawn_reader(engine: Arc<NatEngine>, key: FlowKey, guest_mac: MacAddr, flow: 
                 }
             }
         }
-        engine
-            .udp_flows
-            .lock()
-            .expect("udp flows lock")
-            .remove(&key);
+        engine.udp_flows.lock_recover().remove(&key);
     });
 }

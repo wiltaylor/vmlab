@@ -210,7 +210,7 @@ impl DhcpServer {
         };
         self.grant(req.chaddr, ip);
         debug!(mac = %req.chaddr, %ip, "DHCP offer");
-        Some(self.build_reply(req, DHCP_OFFER, Some(ip)))
+        self.build_reply(req, DHCP_OFFER, Some(ip))
     }
 
     fn on_request(&mut self, req: &BootpRequest) -> Option<Vec<u8>> {
@@ -241,11 +241,11 @@ impl DhcpServer {
             Some(ip) => {
                 self.grant(req.chaddr, ip);
                 debug!(mac = %req.chaddr, %ip, "DHCP ack");
-                Some(self.build_reply(req, DHCP_ACK, Some(ip)))
+                self.build_reply(req, DHCP_ACK, Some(ip))
             }
             None => {
                 debug!(mac = %req.chaddr, ?requested, "DHCP nak");
-                Some(self.build_reply(req, DHCP_NAK, None))
+                self.build_reply(req, DHCP_NAK, None)
             }
         }
     }
@@ -317,7 +317,12 @@ impl DhcpServer {
 
     // -- reply construction -------------------------------------------------------
 
-    fn build_reply(&self, req: &BootpRequest, msg_type: u8, yiaddr: Option<Ipv4Addr>) -> Vec<u8> {
+    fn build_reply(
+        &self,
+        req: &BootpRequest,
+        msg_type: u8,
+        yiaddr: Option<Ipv4Addr>,
+    ) -> Option<Vec<u8>> {
         let cfg = &self.config;
         let yiaddr = yiaddr.unwrap_or(Ipv4Addr::UNSPECIFIED);
         let ciaddr = if msg_type == DHCP_ACK {
@@ -378,7 +383,7 @@ impl DhcpServer {
         } else {
             (req.chaddr, yiaddr)
         };
-        let udp = udp_build(cfg.gateway, dst_ip, DHCP_SERVER_PORT, DHCP_CLIENT_PORT, &b);
+        let udp = udp_build(cfg.gateway, dst_ip, DHCP_SERVER_PORT, DHCP_CLIENT_PORT, &b)?;
         let ip = ipv4_build(
             cfg.gateway,
             dst_ip,
@@ -386,8 +391,8 @@ impl DhcpServer {
             64,
             &udp,
             (req.xid & 0xFFFF) as u16,
-        );
-        eth_build(dst_mac, cfg.server_mac, ETHERTYPE_IPV4, &ip)
+        )?;
+        Some(eth_build(dst_mac, cfg.server_mac, ETHERTYPE_IPV4, &ip))
     }
 }
 
@@ -529,8 +534,8 @@ mod tests {
         } else {
             ciaddr
         };
-        let udp = udp_build(src_ip, Ipv4Addr::BROADCAST, 68, 67, &b);
-        let ip = ipv4_build(src_ip, Ipv4Addr::BROADCAST, IPPROTO_UDP, 64, &udp, 1);
+        let udp = udp_build(src_ip, Ipv4Addr::BROADCAST, 68, 67, &b).unwrap();
+        let ip = ipv4_build(src_ip, Ipv4Addr::BROADCAST, IPPROTO_UDP, 64, &udp, 1).unwrap();
         eth_build(MAC_BROADCAST, mac, ETHERTYPE_IPV4, &ip)
     }
 
@@ -817,7 +822,7 @@ mod tests {
         let arp = crate::net::frame::arp_request_build(mac(1), Ipv4Addr::UNSPECIFIED, GW);
         assert!(s.handle(&arp).is_none());
         // UDP to a different port.
-        let udp = udp_build(Ipv4Addr::UNSPECIFIED, Ipv4Addr::BROADCAST, 68, 123, b"ntp?");
+        let udp = udp_build(Ipv4Addr::UNSPECIFIED, Ipv4Addr::BROADCAST, 68, 123, b"ntp?").unwrap();
         let ip = ipv4_build(
             Ipv4Addr::UNSPECIFIED,
             Ipv4Addr::BROADCAST,
@@ -825,7 +830,8 @@ mod tests {
             64,
             &udp,
             1,
-        );
+        )
+        .unwrap();
         let f = eth_build(MAC_BROADCAST, mac(1), ETHERTYPE_IPV4, &ip);
         assert!(s.handle(&f).is_none());
         // Truncated BOOTP payload.
@@ -835,7 +841,8 @@ mod tests {
             68,
             67,
             &[1, 1, 6, 0],
-        );
+        )
+        .unwrap();
         let ip = ipv4_build(
             Ipv4Addr::UNSPECIFIED,
             Ipv4Addr::BROADCAST,
@@ -843,7 +850,8 @@ mod tests {
             64,
             &udp,
             1,
-        );
+        )
+        .unwrap();
         let f = eth_build(MAC_BROADCAST, mac(1), ETHERTYPE_IPV4, &ip);
         assert!(s.handle(&f).is_none());
         // A BOOTP *reply* must not be answered (eth 14 + ip 20 + udp 8 = 42).

@@ -310,7 +310,11 @@ pub fn build_args(
     match &vm.gpu {
         Some(gpu) => match gpu.mode {
             GpuMode::Passthrough => {
-                let addr = gpu.address.as_deref().expect("validated");
+                // §5.1 validation rejects a passthrough gpu with no address;
+                // keep a real error in case a config path skips validation.
+                let addr = gpu.address.as_deref().ok_or_else(|| {
+                    anyhow::anyhow!("gpu passthrough requires an `address` (PRD §5.2)")
+                })?;
                 arg(&mut a, "device", format!("vfio-pci,host={addr}"));
                 if let Some(d) = &vm.display_device {
                     arg(&mut a, "device", d.clone());

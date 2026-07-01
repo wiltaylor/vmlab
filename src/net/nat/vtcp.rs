@@ -141,7 +141,7 @@ fn seq_le(a: u32, b: u32) -> bool {
 
 /// Build the RFC 793 reset answering an unexpected segment. Returns a full
 /// IPv4 packet from the segment's destination back to its source.
-pub(super) fn rst_for(ip: &Ipv4View<'_>, tcp: &TcpView<'_>, ip_id: u16) -> Vec<u8> {
+pub(super) fn rst_for(ip: &Ipv4View<'_>, tcp: &TcpView<'_>, ip_id: u16) -> Option<Vec<u8>> {
     let (seq, ack, flags) = if tcp.is_ack() {
         (tcp.ack(), 0, TCP_RST)
     } else {
@@ -162,7 +162,7 @@ pub(super) fn rst_for(ip: &Ipv4View<'_>, tcp: &TcpView<'_>, ip_id: u16) -> Vec<u
             options: &[],
         },
         &[],
-    );
+    )?;
     frame::ipv4_build(ip.dst(), ip.src(), IPPROTO_TCP, 64, &seg, ip_id)
 }
 
@@ -374,14 +374,17 @@ impl Flow {
             },
             payload,
         );
-        let pkt = frame::ipv4_build(
-            self.key.dst_ip,
-            self.key.guest_ip,
-            IPPROTO_TCP,
-            64,
-            &seg,
-            self.engine.next_ip_id(),
-        );
+        let pkt = seg.and_then(|seg| {
+            frame::ipv4_build(
+                self.key.dst_ip,
+                self.key.guest_ip,
+                IPPROTO_TCP,
+                64,
+                &seg,
+                self.engine.next_ip_id(),
+            )
+        });
+        let Some(pkt) = pkt else { return };
         self.engine.send_frame(self.guest_mac, &pkt).await;
     }
 
